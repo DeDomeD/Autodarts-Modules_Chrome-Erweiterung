@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Autodarts Modules",
+  "version": "0.6.0",
+  "icons": {
+    "16": "Main/assets/ICON.png",
+    "32": "Main/assets/ICON.png",
+    "48": "Main/assets/ICON.png",
+    "128": "Main/assets/ICON.png"
+  },
+  "permissions": ["storage", "scripting"],
+  "description": "Autodarts modules with Streamer.bot integration and overlay tooling.",
+  "host_permissions": [
+    "https://play.autodarts.io/*",
+    "http://127.0.0.1:8765/*",
+    "http://localhost:8765/*"
+  ],
+  "background": {
+    "service_worker": "Main/core/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://play.autodarts.io/*"],
+      "js": [
+        "Main/core/content.js",
+        "Modules/macros/content.js",
+        "Modules/websitedesign/Horizontal/config.js",
+        "Modules/websitedesign/Vertical/config.js",
+        "Modules/websitedesign/Horizontal/library.js",
+        "Modules/websitedesign/Vertical/library.js",
+        "Modules/websitedesign/content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_icon": {
+      "16": "Main/assets/ICON_grau_16.png",
+      "32": "Main/assets/ICON_grau_32.png"
+    },
+    "default_popup": "Main/popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["Main/core/pageScript.js", "Main/settings/settings.ini"],
+      "matches": ["https://play.autodarts.io/*"]
+    }
+  ]
+}
