@@ -292,6 +292,7 @@
 
           if (msg?.type === "SET_SETTINGS") {
             const updated = await AD_SB.setSettings(msg.settings || {});
+            AD_SB.refreshRuntimeConnections?.();
             logInfo("system", "settings updated", {
               keys: Object.keys(msg.settings || {})
             });
@@ -497,7 +498,7 @@
     AD_SB.overlay.bindRuntimePorts();
     await AD_SB.loadSettings();
     try {
-      AD_SB.ensureSBConnection?.();
+      AD_SB.refreshRuntimeConnections?.();
     } catch (e) {
       logError("errors", "initial streamerbot connect failed", { error: String(e?.message || e) });
     }

@@ -1243,6 +1243,9 @@ body{
 .page{display:none}
 .page.active{display:block}
 .page.blankPage{min-height:100%}
+.pageDisabled .titleMeta{
+  color:rgba(233,238,247,.42);
+}
 
 .nav{
   position:absolute;
@@ -1319,10 +1322,24 @@ body{
   background:linear-gradient(135deg, rgba(25,199,255,.20), rgba(109,75,255,.10));
   box-shadow:0 0 0 1px rgba(25,199,255,.12) inset;
 }
+.navItem.disabled{
+  color:rgba(233,238,247,.34);
+  border-color:rgba(255,255,255,.05);
+  background:rgba(255,255,255,.015);
+}
+.navItem.disabled:not(.active) .navIcon,
+.navItem.disabled:not(.active) .navText{
+  opacity:.72;
+}
 .navItem:hover{
   color:var(--text);
   border-color:rgba(255,255,255,.2);
   background:rgba(255,255,255,.07);
+}
+.navItem.disabled:hover{
+  color:rgba(233,238,247,.5);
+  border-color:rgba(255,255,255,.08);
+  background:rgba(255,255,255,.03);
 }
 .navIcon{
   width:18px;

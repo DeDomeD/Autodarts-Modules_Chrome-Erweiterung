@@ -72,6 +72,10 @@ function normalizeInstalledModules(raw) {
   return out;
 }
 
+function getInstalledModuleSet(raw) {
+  return new Set(normalizeInstalledModules(raw));
+}
+
 function getModuleConfigList() {
   return Object.values(window.AD_SB_MODULE_CONFIGS || {});
 }
@@ -238,8 +242,7 @@ function bindAuto(root, id, key, type = "checkbox") {
   });
 }
 
-function applySbStatus(status) {
-  const pill = $("wsStatus");
+function applyStatusToPill(pill, status) {
   if (!pill) return;
   const state = String(status?.state || "unknown").toLowerCase();
   pill.classList.remove("connected", "disconnected");
@@ -260,13 +263,19 @@ function applySbStatus(status) {
   pill.textContent = t("status_unknown");
 }
 
+function applySbStatus(status, id = "wsStatus") {
+  applyStatusToPill($(id), status);
+}
+
 async function refreshSbStatus() {
-  if (!$("wsStatus")) return;
+  const ids = ["wsStatus", "overlaySbStatus"];
+  if (!ids.some((id) => !!$(id))) return;
   try {
     const res = await send({ type: "GET_SB_STATUS" });
-    applySbStatus(res?.ok ? res.status : { state: "unknown" });
+    const status = res?.ok ? res.status : { state: "unknown" };
+    ids.forEach((id) => applySbStatus(status, id));
   } catch {
-    applySbStatus({ state: "unknown" });
+    ids.forEach((id) => applySbStatus({ state: "unknown" }, id));
   }
 }
 
@@ -494,14 +503,16 @@ function apiFor(root) {
     refreshSbStatus,
     callWebsiteApi,
     normalizeWebsiteApiUrl,
-    getWebsiteAccountUrl
+    getWebsiteAccountUrl,
+    normalizeInstalledModules,
+    getModuleList
   };
 }
 
 function startSbStatusTimer() {
   if (SB_STATUS_TIMER) clearInterval(SB_STATUS_TIMER);
   SB_STATUS_TIMER = null;
-  if (!$("wsStatus")) return;
+  if (!$("wsStatus") && !$("overlaySbStatus")) return;
   refreshSbStatus();
   SB_STATUS_TIMER = setInterval(refreshSbStatus, 1200);
 }
@@ -582,10 +593,10 @@ function buildModuleLayout(settings) {
   if (!host || !nav) return;
 
   const moduleList = getModuleList();
-  const installed = normalizeInstalledModules(settings?.installedModules);
-  clearInvalidLastPageIfNeeded(installed);
-  ACTIVE_MODULES = moduleList.filter((module) => installed.includes(module.id));
-  const needs = collectFeatureNeeds(ACTIVE_MODULES);
+  const installedSet = getInstalledModuleSet(settings?.installedModules);
+  clearInvalidLastPageIfNeeded(settings?.installedModules);
+  ACTIVE_MODULES = moduleList.slice();
+  const needs = collectFeatureNeeds(moduleList.filter((module) => installedSet.has(module.id)));
 
   host.innerHTML = "";
   nav.innerHTML = "";
@@ -602,7 +613,7 @@ function buildModuleLayout(settings) {
   const settingsPage = document.createElement("section");
   settingsPage.className = "page";
   settingsPage.dataset.page = "settings";
-  settingsPage.innerHTML = window.AD_SB_MAIN_SETTINGS?.render?.({ needs }) || "";
+  settingsPage.innerHTML = window.AD_SB_MAIN_SETTINGS?.render?.({ needs, settings, t }) || "";
   host.appendChild(settingsPage);
 
   const settingsBtn = createNavButton(
@@ -617,6 +628,7 @@ function buildModuleLayout(settings) {
     const page = document.createElement("section");
     page.className = "page";
     page.dataset.page = module.id;
+    page.classList.toggle("pageDisabled", !installedSet.has(module.id));
     page.innerHTML = module.render({ needs });
     host.appendChild(page);
 
@@ -626,6 +638,7 @@ function buildModuleLayout(settings) {
       module.icon || "*",
       () => setPage(module.id)
     );
+    btn.classList.toggle("disabled", !installedSet.has(module.id));
     if (module.id === "community") navBottom.appendChild(btn);
     else navMiddle.appendChild(btn);
 

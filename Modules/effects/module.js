@@ -2,6 +2,7 @@
   scope.AD_SB_MODULES = scope.AD_SB_MODULES || {};
 
   let MISS_GUARD_POPUP_OPEN = false;
+  let CONNECTIONS_OPEN = false;
   const TRIGGER_GROUP_COLLAPSED = {};
   const CUSTOM_EFFECT_TRIGGER_OPTIONS = [
     { value: "miss", de: "Miss", en: "Miss" },
@@ -249,7 +250,33 @@
     needs: { streamerbot: true, obs: false },
     render() {
       return `
-        <h2 class="title"><span data-i18n="title_effects">Effects</span><span class="titleMeta">Streamer.bot/OBS</span></h2>
+        <h2 class="title"><span data-i18n="title_effects">Effects</span><span class="titleMeta">Streamer.bot/OBS</span> <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="effectsConnectionToggle" aria-label="Effects Verbindungen" title="Effects Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button></h2>
+
+        <div class="card">
+          <div class="cardHeader">
+            <div class="cardTitle">Streamer.bot Verbindung</div>
+            <div class="pill" id="wsStatus" data-i18n="status_unknown">Unknown</div>
+          </div>
+          <div class="hint">Effects nutzt Streamer.bot nur, wenn das Addon aktiv ist.</div>
+          <div class="inlinePopupWrap${CONNECTIONS_OPEN ? " open" : ""}" id="effectsConnectionWrap" style="padding:0; border-top:none; background:transparent;">
+            <div class="formRow">
+              <label class="label" for="sbUrl" data-i18n="label_ws_url">WS URL</label>
+              <input class="input" id="sbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
+              <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
+            </div>
+            <div class="formRow">
+              <label class="label" for="actionPrefix" data-i18n="label_action_prefix">Action Prefix</label>
+              <input class="input" id="actionPrefix" type="text" placeholder="AD-SB " />
+              <div class="hint" data-i18n="hint_action_prefix">Actions run as Prefix + Suffix.</div>
+            </div>
+            <div class="rowSplit">
+              <button id="btnSaveEffectsConn" class="btn" type="button">Speichern</button>
+              <button id="btnTestWS" class="btnPrimary" type="button" data-i18n="btn_test_streamerbot">Test Streamer.bot</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
 
         <div class="sectionTitle" data-i18n="section_per_dart">Per Dart</div>
         <div class="list">
@@ -429,6 +456,23 @@
       ids.forEach((id) => api.bindAuto(root, id, id));
       api.bindAuto(root, "missGuardThreshold", "missGuardThreshold", "number");
 
+      root.querySelector("#effectsConnectionToggle")?.addEventListener("click", () => {
+        CONNECTIONS_OPEN = !CONNECTIONS_OPEN;
+        scope.AD_SB_MODULES.effects.sync(api, api.getSettings?.() || {});
+      });
+
+      root.querySelector("#btnSaveEffectsConn")?.addEventListener("click", async () => {
+        await api.savePartial({
+          sbUrl: root.querySelector("#sbUrl")?.value?.trim() || "",
+          actionPrefix: api.normalizePrefix(root.querySelector("#actionPrefix")?.value || "")
+        });
+      });
+
+      root.querySelector("#btnTestWS")?.addEventListener("click", async () => {
+        await api.send({ type: "SB_TEST" });
+        setTimeout(api.refreshSbStatus, 150);
+      });
+
       root.querySelector("#missGuardPopupToggle")?.addEventListener("click", () => {
         MISS_GUARD_POPUP_OPEN = !MISS_GUARD_POPUP_OPEN;
         scope.AD_SB_MODULES.effects.sync(api, api.getSettings?.() || {});
@@ -530,7 +574,16 @@
         "missGuardOnDoubleOut"
       ];
       ids.forEach((id) => api.setChecked(root, id, !!s[id]));
+      api.setValue(root, "sbUrl", s.sbUrl || "");
+      api.setValue(root, "actionPrefix", String(s.actionPrefix || "").trim());
       api.setValue(root, "missGuardThreshold", Number.isFinite(s.missGuardThreshold) ? s.missGuardThreshold : 40);
+      const connectionWrap = root.querySelector("#effectsConnectionWrap");
+      if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
+      const connectionToggle = root.querySelector("#effectsConnectionToggle");
+      if (connectionToggle) {
+        connectionToggle.classList.toggle("active", CONNECTIONS_OPEN);
+        connectionToggle.innerHTML = `<span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span>`;
+      }
       const popupWrap = root.querySelector("#missGuardPopupWrap");
       if (popupWrap) popupWrap.classList.toggle("open", MISS_GUARD_POPUP_OPEN);
       const popupToggle = root.querySelector("#missGuardPopupToggle");
@@ -545,6 +598,7 @@
       if (triggerPickerMount) triggerPickerMount.innerHTML = renderTriggerPickerGroups(s);
       const mount = root.querySelector("#customEffectsListMount");
       if (mount) mount.innerHTML = renderCustomEffectsList(s);
+      api.refreshSbStatus?.();
     }
   };
 })(window);

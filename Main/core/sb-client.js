@@ -46,7 +46,35 @@
     reconnectTimer = null;
   }
 
+  function normalizeInstalledModules(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean);
+  }
+
+  function shouldUseStreamerbot(settings = AD_SB.getSettings()) {
+    const installed = new Set(normalizeInstalledModules(settings?.installedModules));
+    return !!settings?.enabled && installed.has("effects");
+  }
+
+  function disconnectSBConnection(reason = "manual") {
+    clearReconnectTimer();
+    sbConnecting = false;
+    actionQueue.length = 0;
+    if (sbSocket) {
+      try {
+        sbSocket.onopen = null;
+        sbSocket.onclose = null;
+        sbSocket.onerror = null;
+        sbSocket.close();
+      } catch {}
+      sbSocket = null;
+    }
+    sbOutageActive = false;
+    setSBStatus({ state: "disconnected", lastError: reason });
+  }
+
   function scheduleReconnect(reason = "unknown") {
+    if (!shouldUseStreamerbot()) return;
     if (reconnectTimer) return;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -56,7 +84,13 @@
   }
 
   function ensureSBConnection() {
-    const url = AD_SB.getSettings().sbUrl;
+    const settings = AD_SB.getSettings();
+    const url = settings.sbUrl;
+
+    if (!shouldUseStreamerbot(settings)) {
+      disconnectSBConnection("disabled");
+      return;
+    }
 
     if (sbSocket && (sbSocket.readyState === WebSocket.OPEN || sbSocket.readyState === WebSocket.CONNECTING)) return;
     if (sbConnecting) return;
@@ -156,6 +190,7 @@
       AD_SB.wled?.handleActionTrigger?.(key, args);
     } catch {}
     if (!suffix) return;
+    if (!shouldUseStreamerbot(settings)) return;
 
     const actionName = settings.actionPrefix + suffix;
     logAction(key, actionName, args);
@@ -212,5 +247,10 @@
   AD_SB.fireActionByKey = fireActionByKey;
   AD_SB.connectOnceForTest = connectOnceForTest;
   AD_SB.ensureSBConnection = ensureSBConnection;
+  AD_SB.disconnectSBConnection = disconnectSBConnection;
+  AD_SB.refreshRuntimeConnections = () => {
+    if (shouldUseStreamerbot()) ensureSBConnection();
+    else disconnectSBConnection("disabled");
+  };
   AD_SB.getSBStatus = getSBStatus;
 })(self);

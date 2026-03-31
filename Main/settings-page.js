@@ -1,16 +1,45 @@
 (function initMainSettingsPage(scope) {
   let ACCOUNT_STATUS_TEXT = "";
 
+  function getInstalledModuleSet(settings) {
+    return new Set((Array.isArray(settings?.installedModules) ? settings.installedModules : [])
+      .map((item) => String(item || "").trim().toLowerCase())
+      .filter(Boolean));
+  }
+
+  function getModuleEntries() {
+    const modules = scope.AD_SB_MODULES || {};
+    const order = ["effects", "overlay", "wled", "caller", "obszoom", "macros", "websitedesign", "community", "liga"];
+    return order
+      .map((id) => modules[id])
+      .filter((module) => module && module.id);
+  }
+
+  function renderAddonToggleList(context = {}) {
+    const installed = getInstalledModuleSet(context.settings || {});
+    return `
+      <div class="list">
+        ${getModuleEntries().map((module) => `
+          <div class="listToggle">
+            <div class="liText">
+              <div class="liTitle">${context.t?.(module.navLabelKey || `nav_${module.id}`) || module.id}</div>
+              <div class="liSub">${module.id}</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" data-addon-toggle="${module.id}" ${installed.has(module.id) ? "checked" : ""} />
+              <span class="slider"></span>
+            </label>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
   scope.AD_SB_MAIN_SETTINGS = {
     id: "settings",
     icon: "[]",
     navLabelKey: "nav_settings",
     render(context = {}) {
-      const needs = context.needs || {};
-      const showConnections = !!(needs.streamerbot || needs.obs);
-      const showSb = !!needs.streamerbot;
-      const showObs = !!needs.obs;
-
       return `
         <h2 class="title" data-i18n="title_settings">Settings</h2>
 
@@ -38,51 +67,11 @@
           </div>
         </div>
 
-        ${showConnections ? `
-          <div class="sectionHead">
-            <div class="sectionTitle" data-i18n="section_connections">Connections</div>
-            <button id="btnSaveConn" class="btnMini" data-i18n="btn_save_connections">Save Connections</button>
-          </div>
-          <div class="card">
-            ${showSb ? `
-              <div class="cardHeader">
-                <div class="cardTitle" data-i18n="card_streamerbot">Streamer.bot WebSocket</div>
-                <div class="pill" id="wsStatus" data-i18n="status_unknown">Unknown</div>
-              </div>
-
-              <div class="formRow">
-                <label class="label" for="sbUrl" data-i18n="label_ws_url">WS URL</label>
-                <input class="input" id="sbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
-                <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
-              </div>
-
-              <div class="formRow">
-                <label class="label" for="actionPrefix" data-i18n="label_action_prefix">Action Prefix</label>
-                <input class="input" id="actionPrefix" type="text" placeholder="AD-SB " />
-                <div class="hint" data-i18n="hint_action_prefix">Actions run as Prefix + Suffix.</div>
-              </div>
-
-              <div class="rowSplit">
-                <button id="btnTestWS" class="btnPrimary" data-i18n="btn_test_streamerbot">Test Streamer.bot</button>
-              </div>
-            ` : ""}
-
-            ${showSb && showObs ? `<div class="divider"></div>` : ""}
-
-            ${showObs ? `
-              <div class="cardHeader">
-                <div class="cardTitle" data-i18n="card_obs">OBS WebSocket</div>
-                <div class="pill pillSoft" id="obsStatus" data-i18n="status_coming">Coming</div>
-              </div>
-
-              <div class="formRow">
-                <label class="label" for="obsUrl" data-i18n="label_ws_url">WS URL</label>
-                <input class="input" id="obsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
-                <div class="hint" data-i18n="hint_obs_ws">OBS WebSocket Server</div>
-              </div>
-            ` : ""}
-          </div>
-        ` : ""}
+        <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_addons">Addons</div>
+        <div class="card">
+          <div class="hint" data-i18n="addons_hint">Hier kannst du einzelne Addons ein- oder ausschalten. Deaktivierte Addons bleiben sichtbar, wirken aber grauer.</div>
+          <div id="addonsListMount">${renderAddonToggleList({ settings: context.settings || {}, t: context.t })}</div>
+        </div>
 
         <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_account">Account</div>
         <div class="card">
@@ -197,6 +186,14 @@
     bind(api) {
       const root = api.root;
 
+      async function updateInstalledModules(moduleId, isEnabled) {
+        const current = api.normalizeInstalledModules(api.getSettings?.()?.installedModules || []);
+        const set = new Set(current);
+        if (isEnabled) set.add(moduleId);
+        else set.delete(moduleId);
+        await api.savePartial({ installedModules: Array.from(set) });
+      }
+
       async function saveAccountSession(data, statusText) {
         const nextUser = data?.user || null;
         ACCOUNT_STATUS_TEXT = statusText || "";
@@ -206,14 +203,6 @@
           accountUserJson: nextUser ? JSON.stringify(nextUser) : ""
         });
       }
-
-      root.querySelector("#btnSaveConn")?.addEventListener("click", async () => {
-        await api.savePartial({
-          sbUrl: root.querySelector("#sbUrl")?.value?.trim() || "",
-          obsUrl: root.querySelector("#obsUrl")?.value?.trim() || "",
-          actionPrefix: api.normalizePrefix(root.querySelector("#actionPrefix")?.value || "")
-        });
-      });
 
       root.querySelector("#websiteApiUrl")?.addEventListener("change", async () => {
         await api.savePartial({
@@ -296,9 +285,12 @@
         window.open(url, "_blank");
       });
 
-      root.querySelector("#btnTestWS")?.addEventListener("click", async () => {
-        await api.send({ type: "SB_TEST" });
-        setTimeout(api.refreshSbStatus, 150);
+      root.addEventListener("change", async (ev) => {
+        const target = ev.target;
+        if (!target?.matches?.("[data-addon-toggle]")) return;
+        const moduleId = String(target.dataset.addonToggle || "").trim().toLowerCase();
+        if (!moduleId) return;
+        await updateInstalledModules(moduleId, !!target.checked);
       });
 
       root.querySelector("#btnLoadIni")?.addEventListener("click", () => {
@@ -398,16 +390,16 @@
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
-      api.setValue(root, "sbUrl", s.sbUrl || "");
-      api.setValue(root, "obsUrl", s.obsUrl || "");
       api.setValue(root, "websiteApiUrl", s.websiteApiUrl || "http://127.0.0.1:8080");
-      api.setValue(root, "actionPrefix", String(s.actionPrefix || "").trim());
       api.setChecked(root, "enabled", !!s.enabled);
       api.setValue(root, "uiLanguage", String(s.uiLanguage || "de").toLowerCase() === "en" ? "en" : "de");
       api.setChecked(root, "onlyMyThrows", !!s.onlyMyThrows);
       api.setValue(root, "myPlayerIndex", Number.isFinite(s.myPlayerIndex) ? s.myPlayerIndex : 0);
       api.setChecked(root, "debugActions", !!s.debugActions);
       api.setChecked(root, "debugGameEvents", !!s.debugGameEvents);
+
+      const addonsMount = root.querySelector("#addonsListMount");
+      if (addonsMount) addonsMount.innerHTML = renderAddonToggleList({ settings: s, t: api.t });
 
       const statusEl = root.querySelector("#iniStatus");
       if (statusEl && !statusEl.textContent) statusEl.textContent = api.t("status_idle");

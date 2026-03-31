@@ -207,6 +207,12 @@
     return AD_SB.getSettings();
   }
 
+  function isModuleActive(moduleId) {
+    const settings = getSettings();
+    const installed = Array.isArray(settings?.installedModules) ? settings.installedModules : [];
+    return installed.map((item) => String(item || "").trim().toLowerCase()).includes(String(moduleId || "").trim().toLowerCase());
+  }
+
   function isDuplicateThrow(t) {
     const sig = JSON.stringify({
       player: t.player,
@@ -516,6 +522,7 @@
     if (isDuplicateThrow(t)) return;
     AD_SB.overlay.handleThrow(t, lastState);
     lastThrowEvent = t;
+    if (!isModuleActive("effects")) return;
 
     const settings = getSettings();
     if (!settings.enabled) return;
@@ -660,6 +667,7 @@
   function handleGameEvent(e) {
     if (isDuplicateGameEvent(e)) return;
     AD_SB.overlay.handleGameEvent(e, lastState);
+    if (!isModuleActive("effects")) return;
     const settings = getSettings();
     if (!settings.enabled) return;
 
@@ -688,6 +696,7 @@
     if (currPlayer !== null) lastKnownActivePlayer = currPlayer;
     lastState = s;
     AD_SB.overlay.handleState(s);
+    if (!isModuleActive("effects")) return;
 
     const settings = getSettings();
     if (!settings.enabled) return;
@@ -764,6 +773,7 @@
   // UI-Events aus content.js (z.B. undo_click)
   function handleUiEvent(p) {
     AD_SB.overlay.handleUiEvent(p, lastState);
+    if (!isModuleActive("effects")) return;
 
     const settings = getSettings();
     if (!settings.enabled) return;

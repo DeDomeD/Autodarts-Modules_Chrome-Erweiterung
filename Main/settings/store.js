@@ -47,7 +47,6 @@
 
   function normalizeInstalledModules(raw) {
     if (!Array.isArray(raw)) return [...AD_SB.DEFAULTS.installedModules];
-    const required = [...AD_SB.DEFAULTS.installedModules];
     const allow = new Set((AD_SB.DEFAULTS.installedModules || []).map((x) => String(x || "").toLowerCase()));
     for (const key of Object.keys(scope.AD_SB_MODULE_CONFIGS || {})) allow.add(String(key || "").toLowerCase());
     const out = [];
@@ -68,9 +67,6 @@
       out.includes("websitedesign");
     if (hadLegacyBase && !hasAnyNewModule) {
       out.push("wled", "caller", "obszoom", "websitedesign");
-    }
-    for (const id of required) {
-      if (!out.includes(id)) out.push(id);
     }
     return out;
   }
