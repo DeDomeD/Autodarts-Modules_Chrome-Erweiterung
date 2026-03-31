@@ -111,6 +111,33 @@
     if (merged.actions && Object.prototype.hasOwnProperty.call(merged.actions, "playerTurnStart")) {
       delete merged.actions.playerTurnStart;
     }
+    if (!Object.prototype.hasOwnProperty.call(merged, "wledControllersJson")) {
+      const controllers = [];
+      const primaryEndpoint = String(merged.wledPrimaryEndpoint || merged.wledEndpoint || "").trim();
+      const secondaryEndpoint = String(merged.wledSecondaryEndpoint || "").trim();
+      controllers.push({
+        id: "ctrl_1",
+        name: "",
+        endpoint: primaryEndpoint || "http://127.0.0.1"
+      });
+      if (secondaryEndpoint) {
+        controllers.push({
+          id: "ctrl_2",
+          name: "",
+          endpoint: secondaryEndpoint
+        });
+      }
+      merged.wledControllersJson = JSON.stringify(controllers);
+    }
+    if (!Object.prototype.hasOwnProperty.call(merged, "wledEffectsJson")) {
+      merged.wledEffectsJson = "[]";
+    }
+    delete merged.wledEndpoint;
+    delete merged.wledPrimaryEndpoint;
+    delete merged.wledHitEffect;
+    delete merged.wledMissEffect;
+    delete merged.wledSecondaryEnabled;
+    delete merged.wledSecondaryEndpoint;
     return merged;
   }
 

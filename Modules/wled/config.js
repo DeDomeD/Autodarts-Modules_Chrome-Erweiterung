@@ -4,16 +4,14 @@
     id: "wled",
     defaults: {
       wledEnabled: false,
-      wledEndpoint: "http://127.0.0.1",
-      wledHitEffect: "Rainbow",
-      wledMissEffect: "Blink Red"
+      wledControllersJson: "[{\"id\":\"ctrl_1\",\"name\":\"\",\"endpoint\":\"http://127.0.0.1\"}]",
+      wledEffectsJson: "[]"
     },
     ini: {
       togglesBool: ["wledEnabled"],
       modulesConfigString: {
-        wledEndpoint: "http://127.0.0.1",
-        wledHitEffect: "Rainbow",
-        wledMissEffect: "Blink Red"
+        wledControllersJson: "[{\"id\":\"ctrl_1\",\"name\":\"\",\"endpoint\":\"http://127.0.0.1\"}]",
+        wledEffectsJson: "[]"
       }
     }
   };

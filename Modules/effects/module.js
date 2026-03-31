@@ -2,6 +2,7 @@
   scope.AD_SB_MODULES = scope.AD_SB_MODULES || {};
 
   let MISS_GUARD_POPUP_OPEN = false;
+  const TRIGGER_GROUP_COLLAPSED = {};
   const CUSTOM_EFFECT_TRIGGER_OPTIONS = [
     { value: "miss", de: "Miss", en: "Miss" },
     { value: "specialMiss", de: "Special Miss", en: "Special Miss" },
@@ -23,6 +24,88 @@
     { value: "correction", de: "Korrektur", en: "Correction" },
     { value: "myTurnStart", de: "Mein Zug", en: "My Turn Start" },
     { value: "opponentTurnStart", de: "Gegner Zug", en: "Opponent Turn Start" }
+  ];
+  const CUSTOM_EFFECT_TRIGGER_SUGGESTIONS = [
+    ...CUSTOM_EFFECT_TRIGGER_OPTIONS.map((item) => item.value),
+    "throw",
+    "last_throw",
+    "gameon",
+    "takeout",
+    "takeout_finished",
+    "gameshot",
+    "gameshot+d10",
+    "gameshot+t20",
+    "matchshot",
+    "matchshot+bull",
+    "busted",
+    "outside",
+    "bot_throw",
+    "board_starting",
+    "board_started",
+    "board_stopping",
+    "board_stopped",
+    "calibration_started",
+    "calibration_finished",
+    "manual_reset_done",
+    "lobby_in",
+    "lobby_out",
+    "tournament_ready",
+    "range_100_180",
+    "180",
+    "140",
+    "s20",
+    "d10",
+    "t20",
+    "t19",
+    "t18",
+    "t17",
+    "t20_t20_t20",
+    "s20_s20_s20",
+    "d16_d16_d16",
+    "player_1",
+    "player_2",
+    "player_3",
+    "player_4",
+    "player_5",
+    "player_6"
+  ];
+  const CUSTOM_EFFECT_TRIGGER_GROUPS = [
+    {
+      key: "main",
+      de: "Main Source",
+      en: "Main Source",
+      values: ["throw", "last_throw", "gameon", "myTurnStart", "opponentTurnStart", "manual_reset_done"]
+    },
+    {
+      key: "finish",
+      de: "Checkouts",
+      en: "Checkouts",
+      values: ["takeout", "takeout_finished", "gameshot", "matchshot", "winner", "busted", "bust"]
+    },
+    {
+      key: "visit",
+      de: "Visit & Punkte",
+      en: "Visit & Points",
+      values: ["180", "140", "range_100_180", "high100", "high140", "oneeighty", "noScore", "waschmaschine"]
+    },
+    {
+      key: "segments",
+      de: "Segmente",
+      en: "Segments",
+      values: ["s20", "d10", "t20", "outside", "bull", "dbull", "dbl", "tpl"]
+    },
+    {
+      key: "combo",
+      de: "Kombis & Spieler",
+      en: "Combos & Players",
+      values: ["player_1", "player_2", "player_3", "player_4", "bot_throw"]
+    },
+    {
+      key: "system",
+      de: "Board & System",
+      en: "Board & System",
+      values: ["board_starting", "board_started", "board_stopping", "board_stopped", "calibration_started", "calibration_finished", "lobby_in", "lobby_out", "tournament_ready"]
+    }
   ];
 
   function currentLang(settings) {
@@ -50,16 +133,87 @@
 
   function getTriggerLabel(trigger, settings) {
     const lang = currentLang(settings);
+    const normalized = normalizeConfiguredTrigger(trigger);
+    const playerMatch = normalized.match(/^(player|spieler)_(\d+)$/);
+    if (playerMatch) {
+      const number = Number(playerMatch[2]);
+      if (number >= 1) {
+        return lang === "en" ? `Player ${number}` : `Spieler ${number}`;
+      }
+    }
     const option = CUSTOM_EFFECT_TRIGGER_OPTIONS.find((item) => item.value === trigger);
     if (!option) return trigger;
     return lang === "en" ? option.en : option.de;
   }
 
-  function renderCustomEffectTriggerOptions(settings, selectedValue = "") {
+  function renderCustomEffectTriggerSuggestions(settings) {
     const lang = currentLang(settings);
-    return CUSTOM_EFFECT_TRIGGER_OPTIONS
-      .map((item) => `<option value="${item.value}"${item.value === selectedValue ? " selected" : ""}>${lang === "en" ? item.en : item.de}</option>`)
+    return CUSTOM_EFFECT_TRIGGER_SUGGESTIONS
+      .map((value) => {
+        const playerMatch = String(value).match(/^player_(\d+)$/);
+        if (playerMatch) {
+          const number = Number(playerMatch[1]);
+          const label = lang === "en" ? `Player ${number}` : `Spieler ${number}`;
+          return `<option value="${value}" label="${label}"></option>`;
+        }
+        const option = CUSTOM_EFFECT_TRIGGER_OPTIONS.find((item) => item.value === value);
+        const label = option ? (lang === "en" ? option.en : option.de) : value;
+        return `<option value="${value}" label="${label}"></option>`;
+      })
       .join("");
+  }
+
+  function normalizeConfiguredTrigger(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function getPlayerTriggerHintText(value, settings) {
+    const lang = currentLang(settings);
+    const normalized = normalizeConfiguredTrigger(value);
+    if (!/^player_[12]$/.test(normalized) && !/^spieler_[12]$/.test(normalized)) return "";
+    return lang === "en"
+      ? "You can also use player_3, player_4, player_5 and more."
+      : "Du kannst genauso auch player_3, player_4, player_5 usw. verwenden.";
+  }
+
+  function updateTriggerFieldHint(root, settings) {
+    const input = root.querySelector("#customEffectTrigger");
+    const hint = root.querySelector("#customEffectTriggerDynamicHint");
+    if (!hint) return;
+    hint.textContent = getPlayerTriggerHintText(input?.value, settings);
+    hint.style.display = hint.textContent ? "" : "none";
+  }
+
+  function isTriggerGroupCollapsed(groupKey) {
+    return TRIGGER_GROUP_COLLAPSED[groupKey] !== false;
+  }
+
+  function renderTriggerPickerGroups(settings) {
+    const lang = currentLang(settings);
+    return `
+      <div class="triggerPicker">
+        ${CUSTOM_EFFECT_TRIGGER_GROUPS.map((group) => `
+          <div class="triggerGroup">
+            <button
+              type="button"
+              class="triggerGroupHeader"
+              data-trigger-group-toggle="${group.key}"
+              aria-expanded="${isTriggerGroupCollapsed(group.key) ? "false" : "true"}"
+            >
+              <span class="triggerGroupTitle">${lang === "en" ? group.en : group.de}</span>
+              <span class="triggerGroupArrow">${isTriggerGroupCollapsed(group.key) ? "v" : "^"}</span>
+            </button>
+            <div class="triggerChipRow${isTriggerGroupCollapsed(group.key) ? " hidden" : ""}">
+              ${group.values.map((value) => `
+                <button type="button" class="triggerChip" data-trigger-pick="${value}">
+                  <span class="triggerChipValue">${getTriggerLabel(value, settings)}</span>
+                </button>
+              `).join("")}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
   }
 
   function renderCustomEffectsList(settings) {
@@ -248,7 +402,11 @@
           </div>
           <div class="formRow">
             <label class="label" for="customEffectTrigger" data-i18n="custom_effects_trigger_label">Autodarts Aktion</label>
-            <select class="input" id="customEffectTrigger"></select>
+            <input class="input" id="customEffectTrigger" type="text" list="customEffectTriggerSuggestions" placeholder="z. B. gameshot, range_100_180, t20_t20_t20" />
+            <datalist id="customEffectTriggerSuggestions">${renderCustomEffectTriggerSuggestions({ uiLanguage: "de" })}</datalist>
+            <div class="hint">Freier Trigger oder Schnellwahl. Fuer weitere Spieler einfach <code>player_3</code>, <code>player_4</code>, <code>player_5</code> usw. eintragen.</div>
+            <div class="hint" id="customEffectTriggerDynamicHint" style="display:none;"></div>
+            <div id="customEffectTriggerPickerMount">${renderTriggerPickerGroups({ uiLanguage: "de" })}</div>
           </div>
           <div class="rowSplit">
             <button id="addCustomEffectBtn" class="btnPrimary" type="button" data-i18n="custom_effects_add_btn">Effekt hinzufügen</button>
@@ -276,13 +434,17 @@
         scope.AD_SB_MODULES.effects.sync(api, api.getSettings?.() || {});
       });
 
+      root.querySelector("#customEffectTrigger")?.addEventListener("input", () => {
+        updateTriggerFieldHint(root, api.getSettings?.() || {});
+      });
+
       root.querySelector("#addCustomEffectBtn")?.addEventListener("click", async () => {
         const settings = api.getSettings?.() || {};
         const nameInput = root.querySelector("#customEffectName");
         const triggerInput = root.querySelector("#customEffectTrigger");
         const statusEl = root.querySelector("#customEffectsStatus");
         const name = String(nameInput?.value || "").trim();
-        const trigger = String(triggerInput?.value || "").trim();
+        const trigger = normalizeConfiguredTrigger(triggerInput?.value);
         if (!name || !trigger) {
           if (statusEl) statusEl.textContent = currentLang(settings) === "en"
             ? "Please enter a name and choose a trigger."
@@ -302,7 +464,7 @@
         });
 
         if (nameInput) nameInput.value = "";
-        if (triggerInput && !triggerInput.value) triggerInput.value = CUSTOM_EFFECT_TRIGGER_OPTIONS[0]?.value || "";
+        if (triggerInput) triggerInput.value = "";
         if (statusEl) statusEl.textContent = currentLang(settings) === "en"
           ? "Custom effect added."
           : "Benutzerdefinierter Effekt hinzugefügt.";
@@ -320,6 +482,27 @@
       });
 
       root.addEventListener("click", async (ev) => {
+        const groupToggleBtn = ev.target?.closest?.("[data-trigger-group-toggle]");
+        if (groupToggleBtn) {
+          const groupKey = String(groupToggleBtn.dataset.triggerGroupToggle || "");
+          if (groupKey) {
+            TRIGGER_GROUP_COLLAPSED[groupKey] = !isTriggerGroupCollapsed(groupKey);
+            const triggerPickerMount = root.querySelector("#customEffectTriggerPickerMount");
+            if (triggerPickerMount) triggerPickerMount.innerHTML = renderTriggerPickerGroups(api.getSettings?.() || {});
+          }
+          return;
+        }
+
+        const triggerPickBtn = ev.target?.closest?.("[data-trigger-pick]");
+        if (triggerPickBtn) {
+          const triggerInput = root.querySelector("#customEffectTrigger");
+          if (triggerInput) {
+            triggerInput.value = String(triggerPickBtn.dataset.triggerPick || "");
+            triggerInput.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          return;
+        }
+
         const btn = ev.target?.closest?.("[data-custom-effect-delete]");
         if (!btn) return;
         const settings = api.getSettings?.() || {};
@@ -355,8 +538,11 @@
         popupToggle.classList.toggle("active", MISS_GUARD_POPUP_OPEN);
         popupToggle.innerHTML = `<span class="ddArrow">${MISS_GUARD_POPUP_OPEN ? "▲" : "▼"}</span>`;
       }
-      const triggerSelect = root.querySelector("#customEffectTrigger");
-      if (triggerSelect) triggerSelect.innerHTML = renderCustomEffectTriggerOptions(s, triggerSelect.value || CUSTOM_EFFECT_TRIGGER_OPTIONS[0]?.value || "");
+      const triggerSuggestions = root.querySelector("#customEffectTriggerSuggestions");
+      if (triggerSuggestions) triggerSuggestions.innerHTML = renderCustomEffectTriggerSuggestions(s);
+      updateTriggerFieldHint(root, s);
+      const triggerPickerMount = root.querySelector("#customEffectTriggerPickerMount");
+      if (triggerPickerMount) triggerPickerMount.innerHTML = renderTriggerPickerGroups(s);
       const mount = root.querySelector("#customEffectsListMount");
       if (mount) mount.innerHTML = renderCustomEffectsList(s);
     }

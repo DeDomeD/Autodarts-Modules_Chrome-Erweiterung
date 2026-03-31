@@ -8,12 +8,14 @@
     "48": "Main/assets/ICON.png",
     "128": "Main/assets/ICON.png"
   },
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "tabs"],
   "description": "Autodarts modules with Streamer.bot integration and overlay tooling.",
   "host_permissions": [
     "https://play.autodarts.io/*",
     "http://127.0.0.1:8765/*",
-    "http://localhost:8765/*"
+    "http://localhost:8765/*",
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "Main/core/background.js"
@@ -22,7 +24,7 @@
     {
       "matches": ["https://play.autodarts.io/*"],
       "js": [
-        "Main/core/content.js",
+        "Main/bridge/content.js",
         "Modules/macros/content.js",
         "Modules/websitedesign/Horizontal/config.js",
         "Modules/websitedesign/Vertical/config.js",
@@ -42,7 +44,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["Main/core/pageScript.js", "Main/settings/settings.ini"],
+      "resources": ["Main/bridge/pageScript.js", "Main/settings/settings.ini"],
       "matches": ["https://play.autodarts.io/*"]
     }
   ]

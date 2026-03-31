@@ -24,6 +24,7 @@ importScripts(
   extUrl("Main/settings/store.js"),
   extUrl("Main/core/logger.js"),
   extUrl("Main/core/data-capture.js"),
+  extUrl("Modules/wled/engine.js"),
   extUrl("Main/core/sb-client.js"),
   extUrl("Modules/overlay/engine.js"),
   extUrl("Modules/effects/engine.js"),

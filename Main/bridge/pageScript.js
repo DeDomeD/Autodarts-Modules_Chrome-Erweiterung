@@ -9,7 +9,7 @@
   if (window.__AD_SB_PATCHED__) return;
   window.__AD_SB_PATCHED__ = true;
 
-  console.log("[Autodarts Modules] pageScript patch active");
+  console.log("[Autodarts Modules] bridge/pageScript active");
 
   const NativeWS = window.WebSocket;
   const NativeFetch = window.fetch ? window.fetch.bind(window) : null;
@@ -19,6 +19,10 @@
   let lastCustomEventAt = 0;
   let lastCaptureSig = "";
   let lastCaptureAt = 0;
+  let lastObservedStateSig = "";
+  let lastObservedStateAt = 0;
+  let bridgeScanTimer = null;
+  let bridgeDomObserver = null;
 
   function post(payload) {
     window.postMessage({ __AD_SB__: true, payload }, "*");
@@ -644,6 +648,268 @@
     };
   }
 
+  function getNumberOrNull(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function normalizeText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function looksCheckoutText(text) {
+    const normalized = normalizeText(text);
+    if (!normalized || normalized.length < 2 || normalized.length > 120) return false;
+    const lower = normalized.toLowerCase();
+    if (
+      lower.includes("checkout") ||
+      lower.includes("check out") ||
+      lower.includes("finish") ||
+      lower.includes("bogey") ||
+      lower.includes("to go")
+    ) return true;
+    return /\b(?:t|d|s)?(?:20|19|18|17|16|15|14|13|12|11|10|9|8|7|6|5|4|3|2|1|25)\b/i.test(normalized);
+  }
+
+  function dedupeObservedState(payload) {
+    const sig = JSON.stringify({
+      t: payload?.type,
+      m: payload?.matchId,
+      p: payload?.player,
+      r: payload?.round,
+      s: payload?.set,
+      l: payload?.leg,
+      w: payload?.winner,
+      c: payload?.checkoutGuide,
+      scores: payload?.playerScores
+    });
+    const now = Date.now();
+    if (sig === lastObservedStateSig && (now - lastObservedStateAt) < 450) return true;
+    lastObservedStateSig = sig;
+    lastObservedStateAt = now;
+    return false;
+  }
+
+  function emitObservedState(source, stateLike, meta = {}) {
+    if (!stateLike || typeof stateLike !== "object") return;
+    const payload = {
+      type: "state",
+      ts: Date.now(),
+      matchId: stateLike.matchId ?? null,
+      player: stateLike.player ?? null,
+      round: stateLike.round ?? null,
+      set: stateLike.set ?? null,
+      leg: stateLike.leg ?? null,
+      turnBusted: !!stateLike.turnBusted,
+      gameFinished: !!stateLike.gameFinished,
+      winner: stateLike.winner ?? null,
+      checkoutGuide: stateLike.checkoutGuide ?? null,
+      playerScores: Array.isArray(stateLike.playerScores) ? stateLike.playerScores : null,
+      raw: {
+        source,
+        meta,
+        observed: stateLike.raw ?? stateLike
+      }
+    };
+    const hasUsefulData =
+      !!payload.matchId ||
+      payload.player !== null ||
+      !!payload.checkoutGuide ||
+      (Array.isArray(payload.playerScores) && payload.playerScores.some((x) => Number.isFinite(Number(x))));
+    if (!hasUsefulData) return;
+    if (dedupeObservedState(payload)) return;
+    post(payload);
+  }
+
+  function collectCheckoutTextsFromDom() {
+    const selectors = [
+      "[data-testid*='checkout']",
+      "[data-testid*='finish']",
+      "[data-testid*='suggest']",
+      "[class*='checkout']",
+      "[class*='finish']",
+      "[class*='suggest']",
+      "[id*='checkout']",
+      "[id*='finish']"
+    ];
+    const out = [];
+    const seen = new Set();
+    for (const selector of selectors) {
+      const nodes = document.querySelectorAll(selector);
+      for (const node of nodes) {
+        const text = normalizeText(node?.textContent || "");
+        if (!looksCheckoutText(text)) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(text);
+        if (out.length >= 8) return out;
+      }
+    }
+    return out;
+  }
+
+  function readScoresFromObjectCollection(collection) {
+    if (!Array.isArray(collection)) return null;
+    const values = collection
+      .map((item) => {
+        if (typeof item === "number") return item;
+        if (!item || typeof item !== "object") return null;
+        return (
+          getNumberOrNull(item.remaining) ??
+          getNumberOrNull(item.scoreToGo) ??
+          getNumberOrNull(item.pointsLeft) ??
+          getNumberOrNull(item.currentScore) ??
+          getNumberOrNull(item.score)
+        );
+      })
+      .filter((value) => Number.isFinite(value));
+    return values.length ? values : null;
+  }
+
+  function scanWindowStateCandidates(reason = "window_scan") {
+    const fixedKeys = [
+      "__NEXT_DATA__",
+      "__APOLLO_STATE__",
+      "__INITIAL_STATE__",
+      "__REDUX_STATE__",
+      "__NUXT__",
+      "autodarts"
+    ];
+    const dynamicKeys = [];
+    try {
+      for (const key of Object.getOwnPropertyNames(window)) {
+        const lower = String(key || "").toLowerCase();
+        if (
+          lower.includes("autodarts") ||
+          lower.includes("checkout") ||
+          lower.includes("matchstate") ||
+          lower.includes("gamestate")
+        ) {
+          dynamicKeys.push(key);
+        }
+        if (dynamicKeys.length >= 10) break;
+      }
+    } catch {}
+
+    const keys = Array.from(new Set(fixedKeys.concat(dynamicKeys)));
+    for (const key of keys) {
+      let value;
+      try {
+        value = window[key];
+      } catch {
+        value = undefined;
+      }
+      if (!value || typeof value !== "object") continue;
+
+      const normalized = normalizeState(value);
+      if (normalized) {
+        emitObservedState(`window:${key}`, normalized, { reason, key });
+      }
+
+      const checkoutGuide = (
+        normalizeState({ state: value })?.checkoutGuide ??
+        findNestedValueByKeys(value, ["checkoutGuide", "checkout", "checkoutPath", "finishSuggestion", "checkoutSuggestion"])
+      );
+      const playerScores = (
+        readScoresFromObjectCollection(value?.players) ??
+        readScoresFromObjectCollection(value?.participants) ??
+        readScoresFromObjectCollection(value?.competitors) ??
+        (Array.isArray(value?.playerScores) ? value.playerScores : null)
+      );
+      if (checkoutGuide || playerScores) {
+        emitObservedState(`window_hint:${key}`, {
+          matchId: value?.matchId ?? value?.id ?? null,
+          player: getNumberOrNull(
+            value?.currentPlayerIndex ??
+            value?.activePlayerIndex ??
+            value?.playerIndex
+          ),
+          round: value?.round ?? null,
+          set: value?.set ?? null,
+          leg: value?.leg ?? null,
+          winner: parseWinnerReference(value?.winner, [value]),
+          checkoutGuide: normalizeText(checkoutGuide),
+          playerScores,
+          raw: value
+        }, { reason, key, mode: "hint" });
+      }
+    }
+  }
+
+  function scanDomStateCandidates(reason = "dom_scan") {
+    const checkoutTexts = collectCheckoutTextsFromDom();
+    if (!checkoutTexts.length) return;
+    emitObservedState("dom_checkout", {
+      checkoutGuide: checkoutTexts[0],
+      raw: {
+        reason,
+        checkoutCandidates: checkoutTexts,
+        url: String(location.href || "")
+      }
+    }, { reason, mode: "dom_checkout" });
+  }
+
+  function queueBridgeScan(reason = "queued") {
+    if (bridgeScanTimer) return;
+    bridgeScanTimer = setTimeout(() => {
+      bridgeScanTimer = null;
+      scanWindowStateCandidates(reason);
+      scanDomStateCandidates(reason);
+    }, 120);
+  }
+
+  function hookWindowKey(key) {
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(window, key);
+      if (descriptor && descriptor.configurable === false) return;
+      if (descriptor && (typeof descriptor.get === "function" || typeof descriptor.set === "function")) return;
+      let current = window[key];
+      Object.defineProperty(window, key, {
+        configurable: true,
+        enumerable: descriptor?.enumerable ?? true,
+        get() {
+          return current;
+        },
+        set(next) {
+          current = next;
+          queueBridgeScan(`window_hook:${key}`);
+        }
+      });
+      if (current !== undefined) queueBridgeScan(`window_existing:${key}`);
+    } catch {
+      // ignore
+    }
+  }
+
+  function startDomAndStateBridge() {
+    if (bridgeDomObserver) return;
+    bridgeDomObserver = new MutationObserver(() => {
+      queueBridgeScan("dom_mutation");
+    });
+    try {
+      bridgeDomObserver.observe(document.documentElement || document, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
+    } catch {
+      // ignore
+    }
+
+    [
+      "__NEXT_DATA__",
+      "__APOLLO_STATE__",
+      "__INITIAL_STATE__",
+      "__REDUX_STATE__",
+      "__NUXT__",
+      "autodarts"
+    ].forEach(hookWindowKey);
+
+    queueBridgeScan("bridge_start");
+    setInterval(() => queueBridgeScan("bridge_poll"), 1500);
+  }
+
   function handleAutodartsMessage(raw) {
     if (typeof raw !== "string") return;
 
@@ -959,9 +1225,11 @@
   bindFetchCapture();
   bindXhrCapture();
   bindEventSourceCapture();
+  startDomAndStateBridge();
   captureGlobalSnapshot("init");
   captureStorageSnapshot("init");
   window.addEventListener("focus", () => {
+    queueBridgeScan("focus");
     captureGlobalSnapshot("focus");
     captureStorageSnapshot("focus");
   });

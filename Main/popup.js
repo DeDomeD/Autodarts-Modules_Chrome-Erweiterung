@@ -6,7 +6,7 @@ let CURRENT_PAGE = "";
 let SEARCH = "";
 let ACTIVE_MODULES = [];
 let SB_STATUS_TIMER = null;
-const WEBSITE_URL = "file:///B:/Desktop/SB-Autodarts/Autodart%20Modules/Website/index.html";
+const WEBSITE_URL = "http://127.0.0.1:8080/";
 
 const MODULE_ORDER = ["effects", "overlay", "wled", "caller", "obszoom", "macros", "websitedesign", "community", "liga"];
 const WEBSITE_ICON_COLOR = "assets/ICON.png";
@@ -29,6 +29,35 @@ function t(key, vars = {}) {
 function normalizePrefix(p) {
   const txt = String(p || "").trim();
   return txt.endsWith(" ") ? txt : `${txt} `;
+}
+
+function normalizeWebsiteApiUrl(url) {
+  return String(url || "http://127.0.0.1:8080").trim().replace(/\/+$/, "");
+}
+
+function getWebsiteAccountUrl() {
+  return `${normalizeWebsiteApiUrl(SETTINGS?.websiteApiUrl)}/account.html`;
+}
+
+async function callWebsiteApi(path, options = {}) {
+  const baseUrl = normalizeWebsiteApiUrl(options.baseUrl || SETTINGS?.websiteApiUrl);
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {})
+  };
+  const token = String(options.token || SETTINGS?.accountToken || "").trim();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${baseUrl}${path}`, {
+    method: options.method || "GET",
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.ok === false) {
+    throw new Error(String(data?.error || `HTTP ${res.status}`));
+  }
+  return data;
 }
 
 function normalizeInstalledModules(raw) {
@@ -368,6 +397,70 @@ function toIniText(s) {
   return `${lines.join("\n")}\n`;
 }
 
+function toModuleIniText(settings, moduleConfig) {
+  const cfg = moduleConfig || {};
+  const ini = cfg.ini || {};
+  const asBool = (v) => (v ? "true" : "false");
+  const lines = [
+    "[module]",
+    `id=${String(cfg.id || "")}`,
+    ""
+  ];
+
+  const boolKeys = Array.isArray(ini.togglesBool) ? ini.togglesBool : [];
+  const numberEntries = Object.entries(ini.togglesNumber || {});
+  if (boolKeys.length || numberEntries.length) {
+    lines.push("[toggles]");
+    for (const key of boolKeys) {
+      lines.push(`${key}=${asBool(settings?.[key])}`);
+    }
+    for (const [key, fallback] of numberEntries) {
+      lines.push(`${key}=${Number.isFinite(settings?.[key]) ? settings[key] : fallback}`);
+    }
+    lines.push("");
+  }
+
+  const moduleConfigEntries = Object.entries(ini.modulesConfigString || {});
+  if (moduleConfigEntries.length) {
+    lines.push("[modules_config]");
+    for (const [key, fallback] of moduleConfigEntries) {
+      lines.push(`${key}=${settings?.[key] || fallback || ""}`);
+    }
+    lines.push("");
+  }
+
+  const actionKeys = [
+    ...Object.keys(cfg.actionDefaults || {}),
+    ...Object.keys(settings?.actions || {}).filter((key) => key.startsWith("custom_"))
+  ].filter((key, index, arr) => arr.indexOf(key) === index);
+  if (actionKeys.length) {
+    lines.push("[actions]");
+    for (const key of actionKeys.sort((a, b) => a.localeCompare(b))) {
+      if (settings?.actions?.[key] !== undefined) {
+        lines.push(`${key}=${settings.actions[key]}`);
+      }
+    }
+    lines.push("");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function buildIniFiles(settings) {
+  const files = [{
+    name: "settings.ini",
+    content: toIniText(settings)
+  }];
+  for (const cfg of getModuleConfigList()) {
+    if (!cfg?.id) continue;
+    files.push({
+      name: `${String(cfg.id || "").toLowerCase()}.ini`,
+      content: toModuleIniText(settings, cfg)
+    });
+  }
+  return files;
+}
+
 function getModuleList() {
   const registry = window.AD_SB_MODULES || {};
   return MODULE_ORDER
@@ -397,7 +490,11 @@ function apiFor(root) {
     normalizePrefix,
     parseIniSettings,
     toIniText,
-    refreshSbStatus
+    buildIniFiles,
+    refreshSbStatus,
+    callWebsiteApi,
+    normalizeWebsiteApiUrl,
+    getWebsiteAccountUrl
   };
 }
 

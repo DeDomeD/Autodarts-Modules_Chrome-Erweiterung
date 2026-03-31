@@ -1,4 +1,6 @@
 (function initMainSettingsPage(scope) {
+  let ACCOUNT_STATUS_TEXT = "";
+
   scope.AD_SB_MAIN_SETTINGS = {
     id: "settings",
     icon: "[]",
@@ -82,6 +84,51 @@
           </div>
         ` : ""}
 
+        <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_account">Account</div>
+        <div class="card">
+          <div class="formRow">
+            <label class="label" for="websiteApiUrl" data-i18n="website_api_url_label">Website API URL</label>
+            <input class="input" id="websiteApiUrl" type="text" placeholder="http://127.0.0.1:8080" />
+            <div class="hint" data-i18n="website_api_url_hint">Standard fuer Website-Account und Extension-Login ist http://127.0.0.1:8080</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="sectionHead">
+            <div class="sectionTitle" style="margin:0;" data-i18n="account_register_title">Account erstellen</div>
+          </div>
+          <div class="formRow">
+            <label class="label" for="accountUsername" data-i18n="account_username_label">Username</label>
+            <input class="input" id="accountUsername" type="text" placeholder="z. B. Dominik" />
+          </div>
+          <div class="formRow">
+            <label class="label" for="accountEmail" data-i18n="account_email_label">Email</label>
+            <input class="input" id="accountEmail" type="email" placeholder="du@example.com" />
+          </div>
+          <div class="formRow">
+            <label class="label" for="accountPassword" data-i18n="account_password_label">Passwort</label>
+            <input class="input" id="accountPassword" type="password" placeholder="mindestens 6 Zeichen" />
+          </div>
+          <div class="rowSplit">
+            <button id="btnAccountRegister" class="btnPrimary" type="button" data-i18n="account_register_btn">Registrieren</button>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="sectionHead">
+            <div class="sectionTitle" style="margin:0;" data-i18n="account_login_title">Login</div>
+          </div>
+          <div class="rowSplit">
+            <button id="btnAccountLogin" class="btnPrimary" type="button" data-i18n="account_login_btn">Einloggen</button>
+            <button id="btnAccountGoogle" class="btn" type="button" data-i18n="account_google_btn">Mit Google anmelden</button>
+            <button id="btnAccountLogout" class="btn" type="button" data-i18n="account_logout_btn">Logout</button>
+          </div>
+          <div class="rowSplit" style="margin-top:10px;">
+            <button id="btnOpenWebsiteAccount" class="btn" type="button" data-i18n="account_open_website_btn">Website Account</button>
+          </div>
+          <div class="hint" id="accountStatus" style="margin-top:10px;"></div>
+        </div>
+
         <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_throw_filter">Throw Filter</div>
         <div class="card">
           <div class="list">
@@ -137,7 +184,12 @@
             <button id="btnSaveIni" class="btnPrimary" data-i18n="btn_save">Save</button>
             <button id="btnLoadIni" class="btn" data-i18n="btn_load">Load</button>
           </div>
+          <div class="rowSplit" style="margin-top:10px;">
+            <button id="btnExportAllIni" class="btnPrimary" type="button">Export All Configs</button>
+            <button id="btnImportAllIni" class="btn" type="button">Import All Configs</button>
+          </div>
           <input id="iniFileInput" type="file" accept=".ini,text/plain" style="display:none;" />
+          <input id="iniFilesInput" type="file" accept=".ini,text/plain" multiple style="display:none;" />
           <div class="hint" id="iniStatus" style="margin-top:8px;"></div>
         </div>
       `;
@@ -145,12 +197,103 @@
     bind(api) {
       const root = api.root;
 
+      async function saveAccountSession(data, statusText) {
+        const nextUser = data?.user || null;
+        ACCOUNT_STATUS_TEXT = statusText || "";
+        await api.savePartial({
+          websiteApiUrl: api.normalizeWebsiteApiUrl(root.querySelector("#websiteApiUrl")?.value || ""),
+          accountToken: String(data?.token || "").trim(),
+          accountUserJson: nextUser ? JSON.stringify(nextUser) : ""
+        });
+      }
+
       root.querySelector("#btnSaveConn")?.addEventListener("click", async () => {
         await api.savePartial({
           sbUrl: root.querySelector("#sbUrl")?.value?.trim() || "",
           obsUrl: root.querySelector("#obsUrl")?.value?.trim() || "",
           actionPrefix: api.normalizePrefix(root.querySelector("#actionPrefix")?.value || "")
         });
+      });
+
+      root.querySelector("#websiteApiUrl")?.addEventListener("change", async () => {
+        await api.savePartial({
+          websiteApiUrl: api.normalizeWebsiteApiUrl(root.querySelector("#websiteApiUrl")?.value || "")
+        });
+      });
+
+      root.querySelector("#btnAccountRegister")?.addEventListener("click", async () => {
+        const statusEl = root.querySelector("#accountStatus");
+        try {
+          if (statusEl) statusEl.textContent = api.t("account_status_registering");
+          const data = await api.callWebsiteApi("/api/auth/register", {
+            method: "POST",
+            baseUrl: root.querySelector("#websiteApiUrl")?.value || "",
+            body: {
+              username: root.querySelector("#accountUsername")?.value || "",
+              email: root.querySelector("#accountEmail")?.value || "",
+              password: root.querySelector("#accountPassword")?.value || ""
+            }
+          });
+          await saveAccountSession(data, api.t("account_status_logged_in", { name: data?.user?.username || "?" }));
+        } catch (e) {
+          ACCOUNT_STATUS_TEXT = String(e?.message || e);
+          scope.AD_SB_MAIN_SETTINGS.sync(api, api.getSettings?.() || {});
+        }
+      });
+
+      root.querySelector("#btnAccountLogin")?.addEventListener("click", async () => {
+        const statusEl = root.querySelector("#accountStatus");
+        try {
+          if (statusEl) statusEl.textContent = api.t("account_status_logging_in");
+          const data = await api.callWebsiteApi("/api/auth/login", {
+            method: "POST",
+            baseUrl: root.querySelector("#websiteApiUrl")?.value || "",
+            body: {
+              email: root.querySelector("#accountEmail")?.value || "",
+              password: root.querySelector("#accountPassword")?.value || ""
+            }
+          });
+          await saveAccountSession(data, api.t("account_status_logged_in", { name: data?.user?.username || "?" }));
+        } catch (e) {
+          ACCOUNT_STATUS_TEXT = String(e?.message || e);
+          scope.AD_SB_MAIN_SETTINGS.sync(api, api.getSettings?.() || {});
+        }
+      });
+
+      root.querySelector("#btnAccountLogout")?.addEventListener("click", async () => {
+        ACCOUNT_STATUS_TEXT = api.t("account_status_logging_out");
+        await api.savePartial({
+          accountToken: "",
+          accountUserJson: ""
+        });
+      });
+
+      root.querySelector("#btnAccountGoogle")?.addEventListener("click", () => {
+        const statusEl = root.querySelector("#accountStatus");
+        (async () => {
+          try {
+            if (statusEl) statusEl.textContent = "Google Login wird im Browser gestartet...";
+            const res = await api.send({
+              type: "START_GOOGLE_AUTH",
+              baseUrl: root.querySelector("#websiteApiUrl")?.value || ""
+            });
+            if (!res?.ok) throw new Error(res?.error || "Google Login fehlgeschlagen");
+            ACCOUNT_STATUS_TEXT = api.t("account_status_logged_in", { name: res?.user?.username || "?" });
+            scope.AD_SB_MAIN_SETTINGS.sync(api, res?.settings || api.getSettings?.() || {});
+          } catch (e) {
+            ACCOUNT_STATUS_TEXT = String(e?.message || e);
+            scope.AD_SB_MAIN_SETTINGS.sync(api, api.getSettings?.() || {});
+          }
+        })();
+      });
+
+      root.querySelector("#btnOpenWebsiteAccount")?.addEventListener("click", () => {
+        const url = api.getWebsiteAccountUrl();
+        if (chrome?.tabs?.create) {
+          chrome.tabs.create({ url });
+          return;
+        }
+        window.open(url, "_blank");
       });
 
       root.querySelector("#btnTestWS")?.addEventListener("click", async () => {
@@ -199,6 +342,52 @@
         }
       });
 
+      root.querySelector("#btnImportAllIni")?.addEventListener("click", () => {
+        const input = root.querySelector("#iniFilesInput");
+        if (!input) return;
+        input.value = "";
+        input.click();
+      });
+
+      root.querySelector("#iniFilesInput")?.addEventListener("change", async (ev) => {
+        const statusEl = root.querySelector("#iniStatus");
+        try {
+          const files = Array.from(ev?.target?.files || []);
+          if (!files.length) return;
+          if (statusEl) statusEl.textContent = "Konfigurationen werden geladen...";
+          const settingsFile = files.find((file) => String(file.name || "").toLowerCase() === "settings.ini");
+          if (!settingsFile) throw new Error("settings.ini fehlt");
+          const text = await settingsFile.text();
+          const partial = api.parseIniSettings(text);
+          if (Object.keys(partial).length === 0) throw new Error(api.t("status_no_valid_values"));
+          await api.savePartial(partial);
+          if (statusEl) statusEl.textContent = `${files.length} Konfigurationsdateien geladen.`;
+        } catch (e) {
+          if (statusEl) statusEl.textContent = `Import fehlgeschlagen: ${String(e?.message || e)}`;
+        }
+      });
+
+      root.querySelector("#btnExportAllIni")?.addEventListener("click", async () => {
+        const statusEl = root.querySelector("#iniStatus");
+        try {
+          if (statusEl) statusEl.textContent = "Konfigurationen werden exportiert...";
+          const files = api.buildIniFiles(api.getSettings());
+          for (const file of files) {
+            const blob = new Blob([file.content], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = file.name;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            await new Promise((resolve) => setTimeout(resolve, 120));
+          }
+          if (statusEl) statusEl.textContent = `${files.length} Konfigurationsdateien exportiert.`;
+        } catch (e) {
+          if (statusEl) statusEl.textContent = `Export fehlgeschlagen: ${String(e?.message || e)}`;
+        }
+      });
+
       api.bindAuto(root, "enabled", "enabled");
       api.bindAuto(root, "uiLanguage", "uiLanguage", "text");
       api.bindAuto(root, "onlyMyThrows", "onlyMyThrows");
@@ -211,6 +400,7 @@
       const s = settings || {};
       api.setValue(root, "sbUrl", s.sbUrl || "");
       api.setValue(root, "obsUrl", s.obsUrl || "");
+      api.setValue(root, "websiteApiUrl", s.websiteApiUrl || "http://127.0.0.1:8080");
       api.setValue(root, "actionPrefix", String(s.actionPrefix || "").trim());
       api.setChecked(root, "enabled", !!s.enabled);
       api.setValue(root, "uiLanguage", String(s.uiLanguage || "de").toLowerCase() === "en" ? "en" : "de");
@@ -221,6 +411,22 @@
 
       const statusEl = root.querySelector("#iniStatus");
       if (statusEl && !statusEl.textContent) statusEl.textContent = api.t("status_idle");
+
+      const accountStatusEl = root.querySelector("#accountStatus");
+      if (accountStatusEl) {
+        if (ACCOUNT_STATUS_TEXT) {
+          accountStatusEl.textContent = ACCOUNT_STATUS_TEXT;
+        } else {
+          try {
+            const user = s.accountUserJson ? JSON.parse(String(s.accountUserJson || "")) : null;
+            accountStatusEl.textContent = user
+              ? api.t("account_status_logged_in", { name: user.username || user.email || "?" })
+              : api.t("account_status_logged_out");
+          } catch {
+            accountStatusEl.textContent = api.t("account_status_logged_out");
+          }
+        }
+      }
     }
   };
 })(window);

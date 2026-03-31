@@ -15,6 +15,7 @@
   let lastKnownActivePlayer = null;
   let lastGameEventSig = null;
   let lastGameEventAt = 0;
+  let lastThrowEvent = null;
 
   let visitDarts = [];
   let visitThrows = [];
@@ -23,6 +24,28 @@
 
   const WASHMACHINE_NUMBERS = [20, 1, 5];
   const SPECIAL_TRIPLES = new Set(["T20", "T19", "T18", "T17"]);
+
+  function normalizeTriggerKey(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function triggerMatchesRule(rule, emittedKey, payload = {}) {
+    const trigger = normalizeTriggerKey(rule);
+    const key = normalizeTriggerKey(emittedKey);
+    if (!trigger || !key) return false;
+    if (trigger === key) return true;
+
+    const rangeMatch = trigger.match(/^range_(\d+)_(\d+)$/);
+    if (rangeMatch) {
+      const sum = Number(payload?.sum);
+      if (!Number.isFinite(sum)) return false;
+      const min = Number(rangeMatch[1]);
+      const max = Number(rangeMatch[2]);
+      return sum >= Math.min(min, max) && sum <= Math.max(min, max);
+    }
+
+    return false;
+  }
 
   function getCustomEffects() {
     try {
@@ -35,11 +58,11 @@
   }
 
   function fireCustomEffects(triggerKey, payload = {}) {
-    const key = String(triggerKey || "").trim();
+    const key = normalizeTriggerKey(triggerKey);
     if (!key) return;
     for (const item of getCustomEffects()) {
       if (item.enabled === false) continue;
-      if (String(item.trigger || "") !== key) continue;
+      if (!triggerMatchesRule(item.trigger, key, payload)) continue;
       const actionKey = String(item.key || "").trim();
       if (!actionKey) continue;
       AD_SB.fireActionByKey(actionKey, {
@@ -50,6 +73,134 @@
         customTrigger: key
       });
     }
+  }
+
+  function dispatchTrigger(triggerKey, payload = {}) {
+    const key = normalizeTriggerKey(triggerKey);
+    if (!key) return;
+    fireCustomEffects(key, payload);
+    if (getSettings().actions?.[key]) {
+      AD_SB.fireActionByKey(key, payload);
+      return;
+    }
+    AD_SB.wled?.handleActionTrigger?.(key, payload);
+  }
+
+  function dispatchTriggerAliases(triggerKeys, payload = {}) {
+    const seen = new Set();
+    for (const key of Array.isArray(triggerKeys) ? triggerKeys : [triggerKeys]) {
+      const normalized = normalizeTriggerKey(key);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      dispatchTrigger(normalized, payload);
+    }
+  }
+
+  function normalizePlayerTriggerName(name) {
+    const raw = String(name || "").trim().toLowerCase();
+    if (!raw) return "";
+    return raw.replace(/\s+/g, "_");
+  }
+
+  function dispatchPlayerNamedTriggers(prefix, playerName, payload = {}) {
+    const exact = String(playerName || "").trim().toLowerCase();
+    const normalized = normalizePlayerTriggerName(playerName);
+    if (prefix) {
+      if (exact) dispatchTrigger(`${prefix}_${exact}`, payload);
+      if (normalized && normalized !== exact) dispatchTrigger(`${prefix}_${normalized}`, payload);
+      return;
+    }
+    if (exact) dispatchTrigger(exact, payload);
+    if (normalized && normalized !== exact) dispatchTrigger(normalized, payload);
+  }
+
+  function dispatchPlayerIndexTriggers(playerIndex, payload = {}) {
+    const idx = Number(playerIndex);
+    if (!Number.isInteger(idx) || idx < 0) return;
+    const number = idx + 1;
+    dispatchTriggerAliases([`player_${number}`, `spieler_${number}`], payload);
+  }
+
+  function getThrowTriggerName(t) {
+    const segUpper = String(t?.segment || "").trim().toUpperCase();
+    if (segUpper === "BULL" || segUpper === "DBULL") return segUpper.toLowerCase();
+    const mult = Number(t?.multiplier);
+    const num = Number(t?.number);
+    if (Number.isFinite(mult) && Number.isFinite(num)) {
+      if (mult === 3) return `t${num}`;
+      if (mult === 2) return num === 25 ? "bull" : `d${num}`;
+      if (mult === 1) return `s${num}`;
+    }
+    const segMatch = segUpper.match(/^([SDT])(\d{1,2})$/);
+    if (segMatch) return `${segMatch[1].toLowerCase()}${Number(segMatch[2])}`;
+    if (/^M(?:ISS)?/.test(segUpper) || segUpper === "OUTSIDE") return "outside";
+    return "";
+  }
+
+  function getEventPlayerName(e) {
+    const body = e?.raw?.data?.body && typeof e.raw.data.body === "object"
+      ? e.raw.data.body
+      : (e?.raw?.body && typeof e.raw.body === "object" ? e.raw.body : e?.raw);
+    const rawName =
+      body?.playerName ??
+      body?.name ??
+      body?.displayName ??
+      body?.winnerName ??
+      body?.player?.name ??
+      body?.winner?.name ??
+      body?.user?.name ??
+      body?.username ??
+      e?.winnerName ??
+      e?.playerName ??
+      "";
+    return String(rawName || "").trim();
+  }
+
+  function getEventThrowTriggerName(e) {
+    return getThrowTriggerName(
+      e?.raw?.data?.body?.dart ??
+      e?.raw?.body?.dart ??
+      e?.raw?.data?.body ??
+      e?.raw?.body ??
+      e?.raw ??
+      e
+    );
+  }
+
+  function getEventTriggerKeys(e) {
+    const rawName = String(e?.event || "").trim();
+    const lower = rawName.toLowerCase();
+    if (!lower) return [];
+
+    const compact = lower.replace(/[\s-]+/g, "_");
+    const keys = new Set([lower, compact]);
+    const compactNoUnderscore = compact.replace(/_/g, "");
+
+    if (compact === "bust") keys.add("busted");
+    if (compact === "winner") keys.add("gameshot");
+    if (compact === "game_shot") keys.add("gameshot");
+    if (compact === "match_shot") keys.add("matchshot");
+    if (compact === "takeoutfinish" || compact === "takeout_finish") keys.add("takeout_finished");
+    if (["leg_won", "leg_finished", "leg_finish", "leg_end"].includes(compact)) keys.add("gameshot");
+    if (["match_won", "match_finished", "match_finish", "match_end"].includes(compact)) keys.add("matchshot");
+    if (["checkout", "check_out", "finish", "takeout"].includes(compact)) keys.add("takeout");
+    if (["checkout_finished", "checkout_finish", "finish_finished", "finish_done"].includes(compact)) {
+      keys.add("takeout_finished");
+    }
+    if (["player_change", "player_changed", "turn_start", "turn_started", "game_on"].includes(compact)) {
+      keys.add("gameon");
+    }
+    if (compactNoUnderscore === "boardstarting") keys.add("board_starting");
+    if (compactNoUnderscore === "boardstarted") keys.add("board_started");
+    if (compactNoUnderscore === "boardstopping") keys.add("board_stopping");
+    if (compactNoUnderscore === "boardstopped") keys.add("board_stopped");
+    if (compactNoUnderscore === "calibrationstarted") keys.add("calibration_started");
+    if (compactNoUnderscore === "calibrationfinished") keys.add("calibration_finished");
+    if (compactNoUnderscore === "manualresetdone") keys.add("manual_reset_done");
+    if (compactNoUnderscore === "lobbyin") keys.add("lobby_in");
+    if (compactNoUnderscore === "lobbyout") keys.add("lobby_out");
+    if (compactNoUnderscore === "tournamentready") keys.add("tournament_ready");
+    return Array.from(keys);
   }
 
   function getSettings() {
@@ -364,6 +515,7 @@
   function handleThrow(t) {
     if (isDuplicateThrow(t)) return;
     AD_SB.overlay.handleThrow(t, lastState);
+    lastThrowEvent = t;
 
     const settings = getSettings();
     if (!settings.enabled) return;
@@ -373,10 +525,56 @@
 
     const segUpper = String(t.segment ?? "").toUpperCase();
     const potentialSum = computeVisitSumAfterAdding(throwScore);
+    const throwTriggerName = getThrowTriggerName(t);
+
+    dispatchTrigger("throw", { ...t, effect: "throw" });
+    if (throwTriggerName) dispatchTrigger(throwTriggerName, { ...t, effect: "throw_named" });
+    if (String(t?.playerName || "").trim()) {
+      dispatchPlayerNamedTriggers("", String(t.playerName || ""), { ...t, effect: "player_throw" });
+      if (/\b(bot|cpu)\b/i.test(String(t.playerName || ""))) {
+        dispatchTrigger("bot_throw", { ...t, effect: "bot_throw" });
+      }
+    }
+    if (!throwTriggerName && throwScore === 0) {
+      dispatchTrigger("outside", { ...t, effect: "outside" });
+    }
 
     if (potentialSum !== null) {
       visitDarts.push(throwScore);
       visitThrows.push(t);
+      dispatchTrigger("last_throw", {
+        ...t,
+        effect: "last_throw",
+        visitSum: potentialSum,
+        darts: visitThrows.slice()
+      });
+
+      const comboKey = visitThrows
+        .map((dart) => getThrowTriggerName(dart))
+        .filter(Boolean)
+        .join("_");
+      if (comboKey && visitThrows.length === 3) {
+        dispatchTrigger(comboKey, {
+          effect: "visit_combo",
+          combo: comboKey,
+          darts: visitThrows.slice(),
+          sum: potentialSum,
+          state: lastState
+        });
+      }
+
+      dispatchTrigger(String(potentialSum), {
+        effect: "visit_total",
+        sum: potentialSum,
+        darts: visitThrows.slice(),
+        state: lastState
+      });
+      dispatchTrigger(`range_${potentialSum}_${potentialSum}`, {
+        effect: "visit_total_range_single",
+        sum: potentialSum,
+        darts: visitThrows.slice(),
+        state: lastState
+      });
 
       const didFireHigh = fireHighscoreIfAny(potentialSum, "third-dart");
       if (settings.enableNoScore && potentialSum === 0) {
@@ -462,6 +660,24 @@
   function handleGameEvent(e) {
     if (isDuplicateGameEvent(e)) return;
     AD_SB.overlay.handleGameEvent(e, lastState);
+    const settings = getSettings();
+    if (!settings.enabled) return;
+
+    const payload = { ...e, effect: "game_event", state: lastState };
+    const eventKeys = getEventTriggerKeys(e);
+    if (eventKeys.length) dispatchTriggerAliases(eventKeys, payload);
+
+    const playerName = getEventPlayerName(e);
+    if (playerName) {
+      if (eventKeys.includes("gameshot")) dispatchPlayerNamedTriggers("gameshot", playerName, payload);
+      if (eventKeys.includes("matchshot")) dispatchPlayerNamedTriggers("matchshot", playerName, payload);
+    }
+
+    const throwName = getEventThrowTriggerName(e);
+    if (throwName) {
+      if (eventKeys.includes("gameshot")) dispatchTrigger(`gameshot+${throwName}`, { ...payload, throwName });
+      if (eventKeys.includes("matchshot")) dispatchTrigger(`matchshot+${throwName}`, { ...payload, throwName });
+    }
   }
 
   // State-Updates (Bust/Winner)
@@ -498,6 +714,10 @@
         state: s
       };
 
+      dispatchTrigger("gameon", payload);
+      dispatchPlayerNamedTriggers("", playerName, payload);
+      dispatchPlayerIndexTriggers(currPlayer, payload);
+
       // Personal transitions only (prevents opponent->opponent trigger spam in 3+ matches).
       if (currIsMe) {
         fireCustomEffects("myTurnStart", payload);
@@ -520,13 +740,22 @@
       if (settings.enableBust) {
         AD_SB.fireActionByKey("bust", { ...s, effect: "bust" });
       }
+      dispatchTrigger("busted", { ...s, effect: "bust" });
       resetVisit();
     }
 
     if (s.gameFinished && typeof s.winner === "number" && s.winner >= 0) {
-      fireCustomEffects("winner", { ...s, effect: "winner" });
+      const winnerName = getPlayerNameByIndex(s, s.winner, `Player ${Number(s.winner) + 1}`);
+      const winnerPayload = { ...s, effect: "winner", winnerName };
+      fireCustomEffects("winner", winnerPayload);
       if (settings.enableWinner) {
-        AD_SB.fireActionByKey("winner", { ...s, effect: "winner" });
+        AD_SB.fireActionByKey("winner", winnerPayload);
+      }
+      dispatchTrigger("gameshot", winnerPayload);
+      dispatchPlayerNamedTriggers("gameshot", winnerName, winnerPayload);
+      if (lastThrowEvent) {
+        const winningThrow = getThrowTriggerName(lastThrowEvent);
+        if (winningThrow) dispatchTrigger(`gameshot+${winningThrow}`, { ...winnerPayload, throw: lastThrowEvent });
       }
     }
 

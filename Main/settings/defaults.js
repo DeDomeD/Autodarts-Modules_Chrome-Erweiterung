@@ -20,8 +20,11 @@
   AD_SB.DEFAULTS = {
     sbUrl: "ws://127.0.0.1:8080/",
     obsUrl: "ws://127.0.0.1:4455/",
+    websiteApiUrl: "http://127.0.0.1:8080",
     actionPrefix: "AD-SB ",
     uiLanguage: "de",
+    accountToken: "",
+    accountUserJson: "",
     installedModules,
 
     enabled: true,

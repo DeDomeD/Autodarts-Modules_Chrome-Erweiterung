@@ -61,6 +61,103 @@
     return /^https:\/\/play\.autodarts\.io\/?/i.test(String(url || ""));
   }
 
+  function normalizeWebsiteApiUrl(url) {
+    return String(url || "http://127.0.0.1:8080").trim().replace(/\/+$/, "");
+  }
+
+  async function startGoogleAuthFlow(baseUrlRaw) {
+    const baseUrl = normalizeWebsiteApiUrl(baseUrlRaw);
+    const startUrl = `${baseUrl}/api/auth/google/start?returnTo=${encodeURIComponent("/account.html")}`;
+    const accountPrefix = `${baseUrl}/account.html`;
+
+    return new Promise((resolve, reject) => {
+      if (!chrome?.tabs?.create || !chrome?.tabs?.onUpdated?.addListener || !chrome?.tabs?.onRemoved?.addListener) {
+        reject(new Error("tabs api not available"));
+        return;
+      }
+
+      let authTabId = null;
+      let done = false;
+
+      function finishError(error) {
+        if (done) return;
+        done = true;
+        cleanup();
+        reject(error instanceof Error ? error : new Error(String(error || "Google login failed")));
+      }
+
+      function finishOk(result) {
+        if (done) return;
+        done = true;
+        cleanup();
+        resolve(result);
+      }
+
+      function cleanup() {
+        try { chrome.tabs.onUpdated.removeListener(handleUpdated); } catch {}
+        try { chrome.tabs.onRemoved.removeListener(handleRemoved); } catch {}
+      }
+
+      async function handleUpdated(tabId, changeInfo, tab) {
+        if (tabId !== authTabId) return;
+        const url = String(changeInfo?.url || tab?.url || "");
+        if (!url || !url.startsWith(accountPrefix)) return;
+
+        try {
+          const parsed = new URL(url);
+          const auth = String(parsed.searchParams.get("auth") || "").trim().toLowerCase();
+          if (!auth) return;
+
+          if (auth === "success") {
+            const token = String(parsed.searchParams.get("token") || "").trim();
+            const rawUser = String(parsed.searchParams.get("user") || "").trim();
+            let user = null;
+            try {
+              user = rawUser ? JSON.parse(rawUser) : null;
+            } catch {}
+            if (!token || !user) {
+              finishError(new Error("Google login returned incomplete account data"));
+              return;
+            }
+            await AD_SB.setSettings({
+              websiteApiUrl: baseUrl,
+              accountToken: token,
+              accountUserJson: JSON.stringify(user)
+            });
+            try { chrome.tabs.remove(tabId, () => void chrome.runtime?.lastError); } catch {}
+            finishOk({ ok: true, token, user });
+            return;
+          }
+
+          const error = String(parsed.searchParams.get("error") || "Google login failed");
+          try { chrome.tabs.remove(tabId, () => void chrome.runtime?.lastError); } catch {}
+          finishError(new Error(error));
+        } catch (e) {
+          finishError(e);
+        }
+      }
+
+      function handleRemoved(tabId) {
+        if (tabId !== authTabId || done) return;
+        finishError(new Error("Google login tab was closed"));
+      }
+
+      chrome.tabs.onUpdated.addListener(handleUpdated);
+      chrome.tabs.onRemoved.addListener(handleRemoved);
+      chrome.tabs.create({ url: startUrl, active: true }, (tab) => {
+        const err = chrome.runtime?.lastError;
+        if (err) {
+          finishError(new Error(String(err.message || err)));
+          return;
+        }
+        authTabId = tab?.id ?? null;
+        if (!Number.isInteger(authTabId)) {
+          finishError(new Error("Could not open Google login tab"));
+        }
+      });
+    });
+  }
+
   function setActionIconForTab(tabId, isColor) {
     try {
       if (!chrome?.action?.setIcon) return;
@@ -214,6 +311,12 @@
             return;
           }
 
+          if (msg?.type === "START_GOOGLE_AUTH") {
+            const result = await startGoogleAuthFlow(msg?.baseUrl || settings.websiteApiUrl);
+            sendResponse({ ok: true, ...result, settings: AD_SB.getSettings() });
+            return;
+          }
+
           if (msg?.type === "OBS_TEST") {
             const ok = await AD_SB.connectOnceForTest(settings.obsUrl);
             logInfo("system", "obs test", { url: settings.obsUrl, ok });
@@ -228,6 +331,32 @@
 
           if (msg?.type === "GET_CAPTURED_DATA") {
             sendResponse({ ok: true, payload: AD_SB.capture?.getSnapshot?.() || null });
+            return;
+          }
+
+          if (msg?.type === "GET_WLED_PRESETS") {
+            const presets = await AD_SB.wled?.fetchPresets?.(msg?.endpoint);
+            logInfo("wled", "presets loaded", {
+              endpoint: msg?.endpoint || "",
+              count: Array.isArray(presets) ? presets.length : 0
+            });
+            sendResponse({ ok: true, presets: Array.isArray(presets) ? presets : [] });
+            return;
+          }
+
+          if (msg?.type === "TRIGGER_WLED_PRESET") {
+            await AD_SB.wled?.triggerPreset?.(msg?.endpoint, msg?.presetId);
+            logInfo("wled", "preset trigger requested", {
+              endpoint: msg?.endpoint || "",
+              presetId: msg?.presetId ?? null
+            });
+            sendResponse({ ok: true });
+            return;
+          }
+
+          if (msg?.type === "TRIGGER_WLED_TARGETS") {
+            await AD_SB.wled?.triggerTargets?.(msg?.targets, settings, msg?.advancedJson || "");
+            sendResponse({ ok: true });
             return;
           }
 

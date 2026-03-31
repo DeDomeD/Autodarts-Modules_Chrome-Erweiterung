@@ -979,6 +979,240 @@ body{
   gap:8px;
 }
 
+.triggerPicker{
+  margin-top:10px;
+  display:grid;
+  gap:10px;
+}
+.triggerGroup{
+  display:grid;
+  gap:8px;
+}
+.triggerGroupHeader{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:14px 16px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:20px;
+  background:linear-gradient(180deg, rgba(26,33,51,.92), rgba(20,27,44,.88));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+  color:var(--text);
+  cursor:pointer;
+  transition:filter .16s ease, border-color .16s ease, background .16s ease;
+}
+.triggerGroupHeader:hover{
+  filter:brightness(1.06);
+  border-color:rgba(255,255,255,.14);
+}
+.triggerGroupTitle{
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:rgba(233,238,247,.78);
+}
+.triggerGroupArrow{
+  flex:0 0 auto;
+  font-size:11px;
+  color:var(--muted);
+}
+.triggerChipRow{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  padding:0 4px 2px;
+}
+.triggerChipRow.hidden{
+  display:none;
+}
+.triggerChip{
+  border:none;
+  border-radius:11px;
+  padding:7px 10px;
+  background:rgba(6,10,18,.72);
+  border:1px solid rgba(255,255,255,.08);
+  color:var(--text);
+  cursor:pointer;
+  text-align:left;
+  transition:filter .16s ease, border-color .16s ease, background .16s ease, transform .16s ease;
+}
+.triggerChip:hover{
+  filter:brightness(1.08);
+  border-color:rgba(25,199,255,.26);
+  background:linear-gradient(135deg, rgba(25,199,255,.16), rgba(109,75,255,.10));
+}
+.triggerChip:active{
+  transform:translateY(1px);
+}
+.triggerChipValue{
+  display:block;
+  font-size:11px;
+  font-weight:700;
+  white-space:nowrap;
+}
+
+.advancedJsonCard{
+  border:1px solid rgba(255,130,130,.18);
+  border-radius:14px;
+  padding:12px;
+  background:
+    radial-gradient(120% 120% at 100% 0%, rgba(255,120,120,.12), transparent 45%),
+    linear-gradient(180deg, rgba(60,18,26,.48), rgba(34,12,18,.42));
+}
+.advancedJsonLabel{
+  color:rgba(255,214,214,.9);
+}
+.advancedJsonInput{
+  min-height:112px;
+  resize:vertical;
+  font-family:Consolas, "Courier New", monospace;
+  line-height:1.4;
+  border-color:rgba(255,130,130,.16);
+  background:rgba(22,8,12,.42);
+}
+.advancedJsonInput:focus{
+  border-color:rgba(255,130,130,.34);
+  box-shadow:0 0 0 3px rgba(255,130,130,.10);
+}
+.advancedJsonHint{
+  color:rgba(255,214,214,.72);
+}
+.advancedJsonHelper{
+  margin-top:12px;
+  border-top:1px solid rgba(255,130,130,.16);
+  padding-top:12px;
+}
+.advancedJsonSectionBody.hidden{
+  display:none;
+}
+.advancedJsonHelperHead{
+  display:grid;
+  gap:8px;
+}
+.advancedJsonHelperTitle{
+  font-size:11px;
+  font-weight:800;
+  color:rgba(255,228,228,.88);
+}
+.advancedJsonModeRow{
+  margin-top:0;
+}
+.advancedJsonModeRow .choiceBtn{
+  background:rgba(22,8,12,.38);
+  border-color:rgba(255,130,130,.14);
+}
+.advancedJsonModeRow .choiceBtn.active{
+  border-color:rgba(255,130,130,.34);
+  background:linear-gradient(135deg, rgba(255,130,130,.22), rgba(255,173,120,.14));
+  box-shadow:0 0 0 1px rgba(255,130,130,.12) inset;
+}
+.advancedJsonHelperControls{
+  display:grid;
+  grid-template-columns:1fr 42px;
+  gap:10px;
+  align-items:center;
+  margin-top:10px;
+}
+.advancedJsonHueSlider{
+  width:100% !important;
+}
+.advancedJsonColorPreview{
+  width:42px;
+  height:42px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.14);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.08), 0 10px 24px rgba(0,0,0,.18);
+}
+
+.presetDropdown{
+  position:relative;
+  margin-top:8px;
+}
+.presetSelectedList{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:8px;
+}
+.presetSelectedChip{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  max-width:100%;
+  border:1px solid rgba(25,199,255,.28);
+  background:linear-gradient(135deg, rgba(25,199,255,.16), rgba(109,75,255,.10));
+  color:var(--text);
+  border-radius:12px;
+  padding:7px 10px;
+  cursor:pointer;
+}
+.presetSelectedChipText{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+}
+.presetSelectedChipTitle{
+  font-size:12px;
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:210px;
+}
+.presetSelectedChipSub{
+  font-size:10px;
+  color:var(--muted);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:210px;
+}
+.presetSelectedChipClose{
+  flex:0 0 auto;
+  font-size:11px;
+  color:var(--muted);
+}
+.presetDropdownBtn{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  text-align:left;
+  cursor:pointer;
+}
+.presetDropdownValue{
+  min-width:0;
+  flex:1;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.presetDropdownArrow{
+  flex:0 0 auto;
+  color:var(--muted);
+  font-size:11px;
+}
+.presetDropdownMenu{
+  display:none;
+  position:relative;
+  margin-top:8px;
+}
+.presetDropdownMenu.open{
+  display:block;
+  max-height:260px;
+  overflow:auto;
+}
+.presetOptionBtn{
+  text-align:left;
+}
+.presetOptionBtn.active{
+  background:linear-gradient(135deg, rgba(25,199,255,.18), rgba(109,75,255,.12));
+}
+
 .switch{position:relative; display:inline-block; width:46px; height:26px; flex:0 0 auto;}
 .switch input{display:none}
 .slider{

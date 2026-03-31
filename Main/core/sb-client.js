@@ -152,6 +152,9 @@
   function fireActionByKey(key, args = {}) {
     const settings = AD_SB.getSettings();
     const suffix = settings.actions?.[key];
+    try {
+      AD_SB.wled?.handleActionTrigger?.(key, args);
+    } catch {}
     if (!suffix) return;
 
     const actionName = settings.actionPrefix + suffix;
