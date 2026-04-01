@@ -7,6 +7,19 @@
  */
 (function initAutodartsTriggers(scope) {
   const AD_SB = scope.AD_SB || (scope.AD_SB = {});
+  const cloneValue = (value) => {
+    if (value === undefined) return undefined;
+    if (typeof structuredClone === "function") {
+      try {
+        return structuredClone(value);
+      } catch {}
+    }
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return value;
+    }
+  };
 
   let lastThrowSig = null;
   let lastThrowSigAt = 0;
@@ -26,6 +39,35 @@
 
   const WASHMACHINE_NUMBERS = [20, 1, 5];
   const SPECIAL_TRIPLES = new Set(["T20", "T19", "T18", "T17"]);
+  const runtimeState = {
+    lastState: null,
+    lastThrow: null,
+    lastGameEvent: null,
+    lastUiEvent: null,
+    lastKnownActivePlayer: null,
+    visitDarts: [],
+    visitThrows: [],
+    checkout: null,
+    updatedAt: 0
+  };
+
+  function syncRuntimeState(patch = {}) {
+    Object.assign(runtimeState, patch, { updatedAt: Date.now() });
+  }
+
+  function getSnapshot() {
+    return {
+      lastState: cloneValue(runtimeState.lastState),
+      lastThrow: cloneValue(runtimeState.lastThrow),
+      lastGameEvent: cloneValue(runtimeState.lastGameEvent),
+      lastUiEvent: cloneValue(runtimeState.lastUiEvent),
+      lastKnownActivePlayer: runtimeState.lastKnownActivePlayer,
+      visitDarts: cloneValue(runtimeState.visitDarts) || [],
+      visitThrows: cloneValue(runtimeState.visitThrows) || [],
+      checkout: cloneValue(runtimeState.checkout),
+      updatedAt: runtimeState.updatedAt || 0
+    };
+  }
 
   function normalizeTriggerKey(value) {
     return String(value || "").trim().toLowerCase();
@@ -461,6 +503,10 @@
     visitWaschmaschineFired = false;
     if (visitTimer) clearTimeout(visitTimer);
     visitTimer = null;
+    syncRuntimeState({
+      visitDarts: [],
+      visitThrows: []
+    });
   }
 
   function armVisitTimeout() {
@@ -747,7 +793,12 @@
   // Haupteinstieg für Dart-Würfe
   function handleThrow(t) {
     if (isDuplicateThrow(t)) return;
-    AD_SB.overlay.handleThrow(t, lastState);
+    syncRuntimeState({
+      lastThrow: t,
+      lastState,
+      lastKnownActivePlayer
+    });
+    AD_SB.overlay.handleThrow(t);
     lastThrowEvent = t;
     if (!hasAnyTriggerConsumer()) return;
 
@@ -776,6 +827,10 @@
     if (potentialSum !== null) {
       visitDarts.push(throwScore);
       visitThrows.push(t);
+      syncRuntimeState({
+        visitDarts: visitDarts.slice(),
+        visitThrows: visitThrows.slice()
+      });
       dispatchTrigger("last_throw", {
         ...t,
         effect: "last_throw",
@@ -843,6 +898,10 @@
       if (visitDarts.length === 0) armVisitTimeout();
       visitDarts.push(throwScore);
       visitThrows.push(t);
+      syncRuntimeState({
+        visitDarts: visitDarts.slice(),
+        visitThrows: visitThrows.slice()
+      });
       maybeFireWaschmaschine();
       armVisitTimeout();
 
@@ -913,7 +972,12 @@
   // Game-Events
   function handleGameEvent(e) {
     if (isDuplicateGameEvent(e)) return;
-    AD_SB.overlay.handleGameEvent(e, lastState);
+    syncRuntimeState({
+      lastGameEvent: e,
+      lastState,
+      lastKnownActivePlayer
+    });
+    AD_SB.overlay.handleGameEvent(e);
     if (!hasAnyTriggerConsumer()) return;
     const settings = getSettings();
 
@@ -945,7 +1009,11 @@
     const currPlayer = resolveActivePlayerFromState(s);
     if (currPlayer !== null) lastKnownActivePlayer = currPlayer;
     lastState = s;
-    AD_SB.overlay.handleState(s);
+    syncRuntimeState({
+      lastState: s,
+      lastKnownActivePlayer
+    });
+    AD_SB.overlay.handleState();
     if (!hasAnyTriggerConsumer()) return;
 
     const settings = getSettings();
@@ -1027,18 +1095,26 @@
       const checkoutSignature = buildCheckoutSignature(checkoutPayload);
       if (checkoutSignature !== lastCheckoutSignature) {
         lastCheckoutSignature = checkoutSignature;
+        syncRuntimeState({ checkout: checkoutPayload });
         dispatchTrigger("checkout", checkoutPayload);
         if (checkoutPayload.recommendedThrow) {
           dispatchTrigger(`checkout_${checkoutPayload.recommendedThrow}`, checkoutPayload);
         }
       }
+    } else if (runtimeState.checkout) {
+      syncRuntimeState({ checkout: null });
     }
 
   }
 
   // UI-Events aus content.js (z.B. undo_click)
   function handleUiEvent(p) {
-    AD_SB.overlay.handleUiEvent(p, lastState);
+    syncRuntimeState({
+      lastUiEvent: p,
+      lastState,
+      lastKnownActivePlayer
+    });
+    AD_SB.overlay.handleUiEvent(p);
     if (!hasAnyTriggerConsumer()) return;
 
     const settings = getSettings();
@@ -1055,6 +1131,12 @@
   }
 
   AD_SB.autodartsTriggers = {
+    getSnapshot,
+    getState: () => cloneValue(runtimeState.lastState),
+    getLastThrow: () => cloneValue(runtimeState.lastThrow),
+    getLastGameEvent: () => cloneValue(runtimeState.lastGameEvent),
+    getLastUiEvent: () => cloneValue(runtimeState.lastUiEvent),
+    getCheckout: () => cloneValue(runtimeState.checkout),
     handleThrow,
     handleGameEvent,
     handleState,

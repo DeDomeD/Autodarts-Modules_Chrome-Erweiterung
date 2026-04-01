@@ -112,18 +112,24 @@
     return makeSnapshot("get_state");
   }
 
-  function handleState(s) {
-    if (!s || typeof s !== "object") return;
+  function getAutodartsSnapshot() {
+    return AD_SB.autodartsTriggers?.getSnapshot?.() || {};
+  }
 
-    const root = s.raw?.state || s.raw || {};
+  function handleState(s) {
+    const snapshot = getAutodartsSnapshot();
+    const state = s || snapshot.lastState;
+    if (!state || typeof state !== "object") return;
+
+    const root = state.raw?.state || state.raw || {};
     const players = Array.isArray(root.players) ? root.players : [];
 
     runtime.leftScore = asFiniteInt(
-      s.playerScores?.[0] ?? readScoreFromPlayer(players[0], runtime.leftScore),
+      state.playerScores?.[0] ?? readScoreFromPlayer(players[0], runtime.leftScore),
       runtime.leftScore
     );
     runtime.rightScore = asFiniteInt(
-      s.playerScores?.[1] ?? readScoreFromPlayer(players[1], runtime.rightScore),
+      state.playerScores?.[1] ?? readScoreFromPlayer(players[1], runtime.rightScore),
       runtime.rightScore
     );
 
@@ -138,11 +144,14 @@
     broadcast("state");
   }
 
-  function handleThrow(t, lastState) {
-    const score = Number(t?.score);
+  function handleThrow(t) {
+    const snapshot = getAutodartsSnapshot();
+    const throwEvent = t || snapshot.lastThrow;
+    const lastState = snapshot.lastState;
+    const score = Number(throwEvent?.score);
     if (!Number.isFinite(score) || score < 0) return;
 
-    const player = Number.isFinite(Number(t?.player)) ? Number(t.player) : Number(lastState?.player);
+    const player = Number.isFinite(Number(throwEvent?.player)) ? Number(throwEvent.player) : Number(lastState?.player);
     if (player === 0) {
       runtime.leftScore = Math.max(0, asFiniteInt(runtime.leftScore - score, runtime.leftScore));
       broadcast("throw");
