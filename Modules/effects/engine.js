@@ -58,6 +58,7 @@
   }
 
   function fireCustomEffects(triggerKey, payload = {}) {
+    if (!isModuleActive("effects")) return;
     const key = normalizeTriggerKey(triggerKey);
     if (!key) return;
     for (const item of getCustomEffects()) {
@@ -78,12 +79,19 @@
   function dispatchTrigger(triggerKey, payload = {}) {
     const key = normalizeTriggerKey(triggerKey);
     if (!key) return;
-    fireCustomEffects(key, payload);
-    if (getSettings().actions?.[key]) {
+    const effectsActive = isModuleActive("effects");
+    if (effectsActive) fireCustomEffects(key, payload);
+    if (effectsActive && getSettings().actions?.[key]) {
       AD_SB.fireActionByKey(key, payload);
-      return;
     }
+    dispatchExternalTrigger(key, payload);
+  }
+
+  function dispatchExternalTrigger(triggerKey, payload = {}) {
+    const key = normalizeTriggerKey(triggerKey);
+    if (!key) return;
     AD_SB.wled?.handleActionTrigger?.(key, payload);
+    AD_SB.obsZoom?.handleActionTrigger?.(key, payload);
   }
 
   function dispatchTriggerAliases(triggerKeys, payload = {}) {
@@ -136,6 +144,7 @@
     if (/^M(?:ISS)?/.test(segUpper) || segUpper === "OUTSIDE") return "outside";
     return "";
   }
+
 
   function getEventPlayerName(e) {
     const body = e?.raw?.data?.body && typeof e.raw.data.body === "object"
@@ -211,6 +220,10 @@
     const settings = getSettings();
     const installed = Array.isArray(settings?.installedModules) ? settings.installedModules : [];
     return installed.map((item) => String(item || "").trim().toLowerCase()).includes(String(moduleId || "").trim().toLowerCase());
+  }
+
+  function hasAnyTriggerConsumer() {
+    return isModuleActive("effects") || isModuleActive("wled") || isModuleActive("obszoom");
   }
 
   function isDuplicateThrow(t) {
@@ -522,10 +535,10 @@
     if (isDuplicateThrow(t)) return;
     AD_SB.overlay.handleThrow(t, lastState);
     lastThrowEvent = t;
-    if (!isModuleActive("effects")) return;
+    if (!hasAnyTriggerConsumer()) return;
 
     const settings = getSettings();
-    if (!settings.enabled) return;
+    const effectsActive = isModuleActive("effects");
     if (!isMyTurn()) return;
     const throwScore = Number(t.score);
     if (!Number.isFinite(throwScore)) return;
@@ -584,7 +597,7 @@
       });
 
       const didFireHigh = fireHighscoreIfAny(potentialSum, "third-dart");
-      if (settings.enableNoScore && potentialSum === 0) {
+      if (effectsActive && settings.enableNoScore && potentialSum === 0) {
         AD_SB.fireActionByKey("noScore", {
           effect: "visit_no_score",
           sum: potentialSum,
@@ -594,6 +607,12 @@
       }
       if (potentialSum === 0) {
         fireCustomEffects("noScore", {
+          effect: "visit_no_score",
+          sum: potentialSum,
+          darts: visitThrows.slice(),
+          state: lastState
+        });
+        dispatchExternalTrigger("noScore", {
           effect: "visit_no_score",
           sum: potentialSum,
           darts: visitThrows.slice(),
@@ -620,29 +639,38 @@
     const inDoubleOutRange = isDoubleOutGuardRange(remaining);
     if (t.score === 0 && inDoubleOutRange) {
       fireCustomEffects("specialMiss", { ...t, effect: "special_miss", remaining });
-      if (settings.enableSpecialMiss) {
+      dispatchExternalTrigger("specialMiss", { ...t, effect: "special_miss", remaining });
+      if (effectsActive && settings.enableSpecialMiss) {
         AD_SB.fireActionByKey("specialMiss", { ...t, effect: "special_miss", remaining });
       }
     }
     if (t.score === 0 && !(settings.missGuardOnDoubleOut && inDoubleOutRange)) {
       fireCustomEffects("miss", t);
+      dispatchExternalTrigger("miss", t);
     }
-    if (settings.enableMiss && t.score === 0 && !(settings.missGuardOnDoubleOut && inDoubleOutRange)) {
+    if (effectsActive && settings.enableMiss && t.score === 0 && !(settings.missGuardOnDoubleOut && inDoubleOutRange)) {
       AD_SB.fireActionByKey("miss", t);
     }
-    if (t.score === 25) fireCustomEffects("bull", t);
-    if (settings.enableBull && t.score === 25) AD_SB.fireActionByKey("bull", t);
-    if (t.score === 50) fireCustomEffects("dbull", t);
-    if (settings.enableDBull && t.score === 50) AD_SB.fireActionByKey("dbull", t);
+    if (t.score === 25) {
+      fireCustomEffects("bull", t);
+      dispatchExternalTrigger("bull", t);
+    }
+    if (effectsActive && settings.enableBull && t.score === 25) AD_SB.fireActionByKey("bull", t);
+    if (t.score === 50) {
+      fireCustomEffects("dbull", t);
+      dispatchExternalTrigger("dbull", t);
+    }
+    if (effectsActive && settings.enableDBull && t.score === 50) AD_SB.fireActionByKey("dbull", t);
 
     const isDoubleBull = t.score === 50
       || (t.multiplier === 2 && Number(t.number) === 25)
       || String(t.segment || "").toUpperCase() === "DBULL";
-    if (settings.enableDouble && t.multiplier === 2 && t.score > 0 && !isDoubleBull) {
+    if (effectsActive && settings.enableDouble && t.multiplier === 2 && t.score > 0 && !isDoubleBull) {
       AD_SB.fireActionByKey("dbl", t);
     }
     if (t.multiplier === 2 && t.score > 0 && !isDoubleBull) {
       fireCustomEffects("dbl", t);
+      dispatchExternalTrigger("dbl", t);
     }
 
     if (t.multiplier === 3) {
@@ -650,13 +678,18 @@
       if (isSpecial) {
         const k = segmentToKey(segUpper);
         const toggleId = "enable" + segUpper;
-        fireCustomEffects(k, t);
-        if (settings[toggleId] !== false) {
-          AD_SB.fireActionByKey(k, t);
+        const alreadyDispatchedNamedThrow = k === throwTriggerName;
+        if (!alreadyDispatchedNamedThrow) {
+          fireCustomEffects(k, t);
+          dispatchExternalTrigger(k, t);
+          if (effectsActive && settings[toggleId] !== false) {
+            AD_SB.fireActionByKey(k, t);
+          }
         }
       } else {
         fireCustomEffects("tpl", t);
-        if (settings.enableTriple) {
+        dispatchExternalTrigger("tpl", t);
+        if (effectsActive && settings.enableTriple) {
           AD_SB.fireActionByKey("tpl", t);
         }
       }
@@ -667,9 +700,8 @@
   function handleGameEvent(e) {
     if (isDuplicateGameEvent(e)) return;
     AD_SB.overlay.handleGameEvent(e, lastState);
-    if (!isModuleActive("effects")) return;
+    if (!hasAnyTriggerConsumer()) return;
     const settings = getSettings();
-    if (!settings.enabled) return;
 
     const payload = { ...e, effect: "game_event", state: lastState };
     const eventKeys = getEventTriggerKeys(e);
@@ -696,10 +728,10 @@
     if (currPlayer !== null) lastKnownActivePlayer = currPlayer;
     lastState = s;
     AD_SB.overlay.handleState(s);
-    if (!isModuleActive("effects")) return;
+    if (!hasAnyTriggerConsumer()) return;
 
     const settings = getSettings();
-    if (!settings.enabled) return;
+    const effectsActive = isModuleActive("effects");
 
     const myIdx = Number(settings.myPlayerIndex);
     const hasPrev = prevPlayer !== null;
@@ -730,12 +762,14 @@
       // Personal transitions only (prevents opponent->opponent trigger spam in 3+ matches).
       if (currIsMe) {
         fireCustomEffects("myTurnStart", payload);
-        if (settings.enableMyTurnStart !== false) {
+        dispatchExternalTrigger("myTurnStart", payload);
+        if (effectsActive && settings.enableMyTurnStart !== false) {
           AD_SB.fireActionByKey("myTurnStart", payload);
         }
       } else {
         fireCustomEffects("opponentTurnStart", payload);
-        if (settings.enableOpponentTurnStart !== false) {
+        dispatchExternalTrigger("opponentTurnStart", payload);
+        if (effectsActive && settings.enableOpponentTurnStart !== false) {
           AD_SB.fireActionByKey("opponentTurnStart", payload);
         }
       }
@@ -746,7 +780,8 @@
 
     if (isMyTurn() && s.turnBusted) {
       fireCustomEffects("bust", { ...s, effect: "bust" });
-      if (settings.enableBust) {
+      dispatchExternalTrigger("bust", { ...s, effect: "bust" });
+      if (effectsActive && settings.enableBust) {
         AD_SB.fireActionByKey("bust", { ...s, effect: "bust" });
       }
       dispatchTrigger("busted", { ...s, effect: "bust" });
@@ -757,7 +792,8 @@
       const winnerName = getPlayerNameByIndex(s, s.winner, `Player ${Number(s.winner) + 1}`);
       const winnerPayload = { ...s, effect: "winner", winnerName };
       fireCustomEffects("winner", winnerPayload);
-      if (settings.enableWinner) {
+      dispatchExternalTrigger("winner", winnerPayload);
+      if (effectsActive && settings.enableWinner) {
         AD_SB.fireActionByKey("winner", winnerPayload);
       }
       dispatchTrigger("gameshot", winnerPayload);
@@ -773,14 +809,15 @@
   // UI-Events aus content.js (z.B. undo_click)
   function handleUiEvent(p) {
     AD_SB.overlay.handleUiEvent(p, lastState);
-    if (!isModuleActive("effects")) return;
+    if (!hasAnyTriggerConsumer()) return;
 
     const settings = getSettings();
-    if (!settings.enabled) return;
+    const effectsActive = isModuleActive("effects");
 
     if (p?.kind === "undo_click") {
       fireCustomEffects("correction", { effect: "undo_click", ts: p.ts ?? Date.now() });
-      if (settings.enableCorrection) {
+      dispatchExternalTrigger("correction", { effect: "undo_click", ts: p.ts ?? Date.now() });
+      if (effectsActive && settings.enableCorrection) {
         AD_SB.fireActionByKey("correction", { effect: "undo_click", ts: p.ts ?? Date.now() });
       }
       resetVisit();

@@ -3,19 +3,28 @@
   configs.obszoom = {
     id: "obszoom",
     defaults: {
-      obsZoomEnabled: false,
       obsZoomSource: "Game Capture",
+      obsZoomSceneName: "",
+      obsZoomTargetSource: "",
       obsZoomDurationMs: 450,
-      obsZoomStrength: 150
+      obsZoomStrength: 150,
+      obsZoomEffectsJson: "[]",
+      checkoutTriggerThreshold: 170
+    },
+    actionDefaults: {
+      checkout: "Checkout"
     },
     ini: {
-      togglesBool: ["obsZoomEnabled"],
       togglesNumber: {
         obsZoomDurationMs: 450,
-        obsZoomStrength: 150
+        obsZoomStrength: 150,
+        checkoutTriggerThreshold: 170
       },
       modulesConfigString: {
-        obsZoomSource: "Game Capture"
+        obsZoomSource: "Game Capture",
+        obsZoomSceneName: "",
+        obsZoomTargetSource: "",
+        obsZoomEffectsJson: "[]"
       }
     }
   };

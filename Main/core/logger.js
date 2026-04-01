@@ -24,6 +24,7 @@
     "ui",
     "actions",
     "sb",
+    "obs",
     "overlay",
     "errors"
   ];

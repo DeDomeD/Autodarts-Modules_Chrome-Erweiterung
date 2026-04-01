@@ -433,7 +433,6 @@
     const theme = getCommunityThemes().find((x) => x.id === String(themeId || "").toLowerCase());
     if (!theme) return;
     await api.savePartial({
-      websiteDesignEnabled: true,
       websiteLayout: theme.layout,
       websiteTheme: theme.id
     });
@@ -448,19 +447,6 @@
       return `
         <h2 class="title"><span data-i18n="title_websitedesign">Website Design</span><span class="titleMeta">Autodarts Web</span></h2>
         <div class="card">
-          <div class="list">
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle">Theme aktiv</div>
-                <div class="liSub">Aendert das Website-Theme direkt im Browser</div>
-              </div>
-              <label class="switch">
-                <input id="websiteDesignEnabled" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-
           <div class="formRow">
             <label class="label">Layout</label>
             <div class="choiceRow">
@@ -544,7 +530,6 @@
     },
     bind(api) {
       const root = api.root;
-      api.bindAuto(root, "websiteDesignEnabled", "websiteDesignEnabled");
       api.bindAuto(root, "websiteDartboardGlowEnabled", "websiteDartboardGlowEnabled");
       api.bindAuto(root, "websiteArenaPrimaryHue", "websiteArenaPrimaryHue", "number");
       api.bindAuto(root, "websiteArenaSecondaryHue", "websiteArenaSecondaryHue", "number");
@@ -563,10 +548,6 @@
       });
 
       root.querySelector("#startThemeBuilderBtn")?.addEventListener("click", async () => {
-        const settings = api.getSettings?.() || {};
-        if (!settings.websiteDesignEnabled) {
-          await api.savePartial({ websiteDesignEnabled: true });
-        }
         try {
           if (chrome?.tabs?.query && chrome?.tabs?.sendMessage) {
             chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -595,9 +576,10 @@
         COMMUNITY_GALLERY_FAVORITES_ONLY = false;
         HUE_MODAL_OPEN = false;
         await api.savePartial({
-          websiteDesignEnabled: false,
           websiteThemeBuilderEnabled: false,
-          websiteThemeBuilderData: "{}"
+          websiteThemeBuilderData: "{}",
+          websiteTheme: "classic",
+          websiteLayout: "horizontal"
         });
       });
 
@@ -695,7 +677,6 @@
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
-      api.setChecked(root, "websiteDesignEnabled", !!s.websiteDesignEnabled);
       api.setChecked(root, "websiteDartboardGlowEnabled", s.websiteDartboardGlowEnabled !== false);
       paint(root, s);
     }

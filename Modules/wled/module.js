@@ -665,22 +665,6 @@
       return `
         <h2 class="title" data-i18n="title_wled">WLED</h2>
         <div class="card">
-          <div class="list">
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle">WLED aktiv</div>
-                <div class="liSub">Aktiviert Preset-Trigger fuer Autodarts-Events.</div>
-              </div>
-              <label class="switch">
-                <input id="wledEnabled" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="spacer"></div>
-        <div class="card">
           <div class="sectionHead">
             <div class="sectionTitle" style="margin:0;">WLED Effekte</div>
             <button id="addWledEffectBtn" class="btnMini" type="button">Hinzufügen</button>
@@ -718,7 +702,6 @@
     },
     bind(api) {
       const root = api.root;
-      api.bindAuto(root, "wledEnabled", "wledEnabled");
       root.querySelector("#wledEffectTrigger")?.addEventListener("input", () => {
         updateTriggerFieldHint(root, api.getSettings?.() || {});
       });
@@ -999,7 +982,6 @@
       const s = settings || {};
       const controllers = getControllers(s);
       wledUiState.advancedJsonDraft = String(root.querySelector("#wledAdvancedJson")?.value || wledUiState.advancedJsonDraft || "");
-      api.setChecked(root, "wledEnabled", !!s.wledEnabled);
 
       const triggerSuggestions = root.querySelector("#wledTriggerSuggestions");
       if (triggerSuggestions) triggerSuggestions.innerHTML = renderTriggerSuggestions(s);

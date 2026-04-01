@@ -79,7 +79,33 @@
     }
     delete merged.installedAddons;
     merged.installedModules = normalizeInstalledModules(merged.installedModules);
+    if (Object.prototype.hasOwnProperty.call(merged, "enabled")) {
+      delete merged.enabled;
+    }
+    const installedSet = new Set(merged.installedModules);
+    const moduleFlagMap = {
+      overlayEnabled: "overlay",
+      wledEnabled: "wled",
+      callerEnabled: "caller",
+      obsZoomEnabled: "obszoom",
+      macrosEnabled: "macros",
+      websiteDesignEnabled: "websitedesign",
+      ligaEnabled: "liga"
+    };
+    for (const [flagKey, moduleId] of Object.entries(moduleFlagMap)) {
+      merged[flagKey] = installedSet.has(moduleId);
+    }
     merged.actions = { ...structuredClone(AD_SB.DEFAULTS.actions), ...(merged.actions || {}) };
+    if (Object.prototype.hasOwnProperty.call(merged, "enableAdNext") && !Object.prototype.hasOwnProperty.call(merged, "enableCheckout")) {
+      merged.enableCheckout = !!merged.enableAdNext;
+    }
+    delete merged.enableAdNext;
+    if (merged.actions && Object.prototype.hasOwnProperty.call(merged.actions, "ad_next") && !Object.prototype.hasOwnProperty.call(merged.actions, "checkout")) {
+      merged.actions.checkout = merged.actions.ad_next;
+    }
+    if (merged.actions && Object.prototype.hasOwnProperty.call(merged.actions, "ad_next")) {
+      delete merged.actions.ad_next;
+    }
     // Legacy cleanup: removed action key.
     if (merged.actions && Object.prototype.hasOwnProperty.call(merged.actions, "overlayUpdate")) {
       delete merged.actions.overlayUpdate;
@@ -142,9 +168,9 @@
       const stored = await storageGet(["settings"]);
       SETTINGS = normalizeSettings(stored?.settings);
       await storageSet({ settings: SETTINGS });
-      console.log("[Autodarts Modules] settings loaded OK");
+      console.log("[Autodarts Modules] Einstellungen wurden geladen");
     } catch (e) {
-      console.error("[Autodarts Modules] loadSettings failed -> using defaults", e);
+      console.error("[Autodarts Modules] Einstellungen konnten nicht geladen werden", e);
       SETTINGS = normalizeSettings(AD_SB.DEFAULTS);
     }
     return SETTINGS;

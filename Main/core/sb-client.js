@@ -2,8 +2,8 @@
  * Streamer.bot WebSocket Client
  * Verantwortung:
  * - Verbindungsaufbau + Reconnect/Queue
- * - Action-Auslösung über `fireActionByKey`
- * - Verbindungs-Schnelltest (`connectOnceForTest`) für Popup
+ * - Action-Ausloesung ueber `fireActionByKey`
+ * - Verbindungs-Schnelltest (`connectOnceForTest`) fuer Popup
  */
 (function initSBClient(scope) {
   const AD_SB = scope.AD_SB || (scope.AD_SB = {});
@@ -14,21 +14,30 @@
 
   let sbSocket = null;
   let sbConnecting = false;
+  let sbHandshakeDone = false;
+  let sbAuthRequestId = "";
   const actionQueue = [];
   let reconnectTimer = null;
   const RECONNECT_DELAY_MS = 2000;
+  const MAX_AUTO_RETRIES = 5;
   let sbOutageActive = false;
+  let sbRetryAttempts = 0;
+  let sbRetryExhausted = false;
   const sbStatus = {
-    state: "unknown", // unknown | connecting | connected | disconnected
+    state: "unknown",
     url: "",
     lastChangeTs: 0,
-    lastError: ""
+    lastError: "",
+    attempts: 0,
+    exhausted: false
   };
 
   function setSBStatus(next) {
     sbStatus.state = String(next?.state || sbStatus.state || "unknown");
     sbStatus.url = String(next?.url ?? sbStatus.url ?? "");
     sbStatus.lastError = String(next?.lastError ?? sbStatus.lastError ?? "");
+    sbStatus.attempts = Number.isFinite(next?.attempts) ? next.attempts : sbRetryAttempts;
+    sbStatus.exhausted = typeof next?.exhausted === "boolean" ? next.exhausted : sbRetryExhausted;
     sbStatus.lastChangeTs = Date.now();
   }
 
@@ -46,6 +55,27 @@
     reconnectTimer = null;
   }
 
+  function base64EncodeBytes(bytes) {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  }
+
+  async function sha256Base64(text) {
+    const data = new TextEncoder().encode(String(text || ""));
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    return base64EncodeBytes(new Uint8Array(digest));
+  }
+
+  async function buildStreamerbotAuthentication(password, salt, challenge) {
+    const secret = await sha256Base64(`${password}${salt}`);
+    return sha256Base64(`${secret}${challenge}`);
+  }
+
   function normalizeInstalledModules(raw) {
     if (!Array.isArray(raw)) return [];
     return raw.map((item) => String(item || "").trim().toLowerCase()).filter(Boolean);
@@ -53,16 +83,44 @@
 
   function shouldUseStreamerbot(settings = AD_SB.getSettings()) {
     const installed = new Set(normalizeInstalledModules(settings?.installedModules));
-    return !!settings?.enabled && installed.has("effects");
+    return installed.has("effects") || installed.has("overlay") || installed.has("obszoom");
+  }
+
+  function resetRetryState() {
+    sbRetryAttempts = 0;
+    sbRetryExhausted = false;
+  }
+
+  function flushActionQueue() {
+    while (actionQueue.length > 0) {
+      const item = actionQueue.shift();
+      sendDoActionNow(item.actionName, item.args);
+    }
+  }
+
+  function markSBConnected(url) {
+    resetRetryState();
+    sbHandshakeDone = true;
+    sbAuthRequestId = "";
+    setSBStatus({ state: "connected", url, lastError: "" });
+    console.log(`[Autodarts Modules] Streamer.bot connected (${url})`);
+    try { AD_SB.logger?.info?.("sb", "streamerbot ws ready", { queued: actionQueue.length }); } catch {}
+    sbConnecting = false;
+    sbOutageActive = false;
+    clearReconnectTimer();
+    flushActionQueue();
   }
 
   function disconnectSBConnection(reason = "manual") {
     clearReconnectTimer();
     sbConnecting = false;
+    sbHandshakeDone = false;
+    sbAuthRequestId = "";
     actionQueue.length = 0;
     if (sbSocket) {
       try {
         sbSocket.onopen = null;
+        sbSocket.onmessage = null;
         sbSocket.onclose = null;
         sbSocket.onerror = null;
         sbSocket.close();
@@ -70,12 +128,18 @@
       sbSocket = null;
     }
     sbOutageActive = false;
+    if (reason === "manual" || reason === "disabled") resetRetryState();
     setSBStatus({ state: "disconnected", lastError: reason });
   }
 
   function scheduleReconnect(reason = "unknown") {
     if (!shouldUseStreamerbot()) return;
     if (reconnectTimer) return;
+    if (sbRetryAttempts >= MAX_AUTO_RETRIES) {
+      sbRetryExhausted = true;
+      setSBStatus({ state: "disconnected", lastError: reason, exhausted: true });
+      return;
+    }
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       ensureSBConnection();
@@ -85,7 +149,8 @@
 
   function ensureSBConnection() {
     const settings = AD_SB.getSettings();
-    const url = settings.sbUrl;
+    const url = String(settings?.sbUrl || "").trim();
+    const password = String(settings?.sbPassword || "");
 
     if (!shouldUseStreamerbot(settings)) {
       disconnectSBConnection("disabled");
@@ -96,7 +161,11 @@
     if (sbConnecting) return;
 
     sbConnecting = true;
+    sbHandshakeDone = false;
+    sbAuthRequestId = "";
     clearReconnectTimer();
+    sbRetryAttempts += 1;
+    sbRetryExhausted = false;
     setSBStatus({ state: "connecting", url, lastError: "" });
     try { AD_SB.logger?.info?.("sb", "connecting to streamerbot", { url }); } catch {}
 
@@ -106,7 +175,7 @@
       setSBStatus({ state: "disconnected", url, lastError: String(e?.message || e) });
       if (!sbOutageActive) {
         sbOutageActive = true;
-        console.warn("[Autodarts Modules] Streamer.bot disconnected ❗ reconnecting...");
+        console.warn("[Autodarts Modules] Streamer.bot disconnected, reconnecting...");
       }
       try { AD_SB.logger?.error?.("errors", "failed to create streamerbot ws", { error: String(e?.message || e), url }); } catch {}
       sbConnecting = false;
@@ -116,33 +185,68 @@
     }
 
     sbSocket.onopen = () => {
-      setSBStatus({ state: "connected", url, lastError: "" });
-      console.log(`[Autodarts Modules] Streamer.bot connected ✅ (${url})`);
+      setSBStatus({ state: "connecting", url, lastError: "" });
       try { AD_SB.logger?.info?.("sb", "streamerbot ws open", { queued: actionQueue.length }); } catch {}
-      sbConnecting = false;
-      sbOutageActive = false;
-      clearReconnectTimer();
+    };
 
-      while (actionQueue.length > 0) {
-        const item = actionQueue.shift();
-        sendDoActionNow(item.actionName, item.args);
+    sbSocket.onmessage = async (event) => {
+      let data = null;
+      try {
+        data = JSON.parse(String(event?.data || ""));
+      } catch {
+        return;
+      }
+
+      if (String(data?.request || "") === "Hello") {
+        const auth = data?.authentication;
+        if (!auth?.salt || !auth?.challenge) {
+          markSBConnected(url);
+          return;
+        }
+        if (!password) {
+          setSBStatus({ state: "disconnected", url, lastError: "auth_required" });
+          try { sbSocket?.close(); } catch {}
+          return;
+        }
+        try {
+          sbAuthRequestId = makeId();
+          const authentication = await buildStreamerbotAuthentication(password, auth.salt, auth.challenge);
+          sbSocket?.send(JSON.stringify({
+            request: "Authenticate",
+            id: sbAuthRequestId,
+            authentication
+          }));
+        } catch (error) {
+          setSBStatus({ state: "disconnected", url, lastError: String(error?.message || error) });
+          try { sbSocket?.close(); } catch {}
+        }
+        return;
+      }
+
+      if (sbAuthRequestId && String(data?.id || "") === sbAuthRequestId) {
+        if (String(data?.status || "").toLowerCase() === "ok") {
+          markSBConnected(url);
+          return;
+        }
+        setSBStatus({ state: "disconnected", url, lastError: String(data?.error || "auth_failed") });
+        try { sbSocket?.close(); } catch {}
       }
     };
 
     sbSocket.onerror = (e) => {
       setSBStatus({ state: "disconnected", url, lastError: String(e?.message || e) });
       try { AD_SB.logger?.error?.("errors", "streamerbot ws error", { error: String(e?.message || e) }); } catch {}
-      // keep console quiet here; onclose handles reconnect notice + schedule
     };
 
     sbSocket.onclose = () => {
       setSBStatus({ state: "disconnected", url, lastError: "" });
       if (!sbOutageActive) {
         sbOutageActive = true;
-        console.warn("[Autodarts Modules] Streamer.bot disconnected ❗ reconnecting...");
+        console.warn("[Autodarts Modules] Streamer.bot disconnected, reconnecting...");
       }
       try { AD_SB.logger?.warn?.("sb", "streamerbot ws closed", {}); } catch {}
       sbConnecting = false;
+      sbHandshakeDone = false;
       sbSocket = null;
       scheduleReconnect("ws_close");
     };
@@ -150,18 +254,72 @@
 
   function logAction(key, actionName, args) {
     const settings = AD_SB.getSettings();
-    if (!settings.debugActions) return;
-    const preview =
-      args && typeof args === "object"
-        ? JSON.parse(JSON.stringify(args, (k, v) => (k === "raw" ? "[raw omitted]" : v)))
-        : args;
-    console.log(`%caction -> key="${key}" name="${actionName}"`, SB_ICON_LOG_STYLE, preview);
+    if (!settings.debugActions && !settings.debugAllLogs) return;
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (!settings.debugAllLogs && (normalizedKey === "checkout" || normalizedKey.startsWith("checkout_"))) return;
+    const triggerLabel = formatActionTriggerLabel(key, args);
+    const actionLabel = formatActionNameLabel(actionName, settings.actionPrefix);
+    console.log(`[Autodarts Modules = Effekte] AD Trigger ${triggerLabel} | SB Action = ${actionLabel}`);
+  }
+
+  function formatActionNameLabel(actionName, prefix) {
+    const full = String(actionName || "").trim();
+    const normalizedPrefix = String(prefix || "").trim();
+    if (!normalizedPrefix) return full;
+    const withSpace = `${normalizedPrefix} `;
+    if (full.startsWith(withSpace)) return full.slice(withSpace.length).trim();
+    if (full.startsWith(normalizedPrefix)) return full.slice(normalizedPrefix.length).trim();
+    return full;
+  }
+
+  function formatComboLabel(combo) {
+    if (!Array.isArray(combo) || !combo.length) return "";
+    return combo
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .sort((a, b) => a - b)
+      .join(",");
+  }
+
+  function formatDartsLabel(darts) {
+    if (!Array.isArray(darts) || !darts.length) return "";
+    const names = darts
+      .map((dart) => String(dart?.segment || "").trim().toUpperCase())
+      .filter(Boolean);
+    return names.join(",");
+  }
+
+  function formatActionTriggerLabel(key, args = {}) {
+    const normalizedKey = String(key || "").trim().toLowerCase();
+    if (normalizedKey === "correction" || args?.effect === "undo_click") return "Undo";
+    if (normalizedKey === "waschmaschine") {
+      return formatComboLabel(args?.combo) || formatDartsLabel(args?.darts) || "Waschmaschine";
+    }
+    if (Array.isArray(args?.combo) && args.combo.length) {
+      return formatComboLabel(args.combo) || String(key || "").trim();
+    }
+    if (typeof args?.segment === "string" && args.segment.trim()) {
+      return args.segment.trim().toUpperCase();
+    }
+    if (typeof args?.recommendedSegment === "string" && args.recommendedSegment.trim()) {
+      return args.recommendedSegment.trim().toUpperCase();
+    }
+    if (typeof args?.recommendedThrow === "string" && args.recommendedThrow.trim()) {
+      return args.recommendedThrow.trim().toUpperCase();
+    }
+    if (typeof args?.event === "string" && args.event.trim()) {
+      return args.event.trim();
+    }
+    if (typeof args?.effect === "string" && args.effect.trim()) {
+      return args.effect.trim();
+    }
+    return String(key || "").trim();
   }
 
   function sendDoActionNow(actionName, args = {}) {
-    if (!sbSocket || sbSocket.readyState !== WebSocket.OPEN) {
+    if (!sbSocket || sbSocket.readyState !== WebSocket.OPEN || !sbHandshakeDone) {
       actionQueue.push({ actionName, args });
-      try { AD_SB.logger?.warn?.("actions", "action queued (ws not open)", { actionName, queued: actionQueue.length }); } catch {}
+      try { AD_SB.logger?.warn?.("actions", "action queued (ws not ready)", { actionName, queued: actionQueue.length }); } catch {}
       ensureSBConnection();
       return;
     }
@@ -187,7 +345,9 @@
     const settings = AD_SB.getSettings();
     const suffix = settings.actions?.[key];
     try {
-      AD_SB.wled?.handleActionTrigger?.(key, args);
+      if (args?.__skipExternalModules !== true) {
+        AD_SB.wled?.handleActionTrigger?.(key, args);
+      }
     } catch {}
     if (!suffix) return;
     if (!shouldUseStreamerbot(settings)) return;
@@ -204,7 +364,7 @@
 
     ensureSBConnection();
 
-    if (!sbSocket || sbSocket.readyState !== WebSocket.OPEN) {
+    if (!sbSocket || sbSocket.readyState !== WebSocket.OPEN || !sbHandshakeDone) {
       actionQueue.push({ actionName, args });
       return;
     }
@@ -212,32 +372,65 @@
     sendDoActionNow(actionName, args);
   }
 
-  function connectOnceForTest(url, timeoutMs = 1200) {
+  function connectOnceForTest(url, password = "", timeoutMs = 1200) {
     return new Promise((resolve) => {
       let done = false;
       try {
         const ws = new WebSocket(url);
-        const t = setTimeout(() => {
+        let authRequestId = "";
+        const timer = setTimeout(() => {
           if (done) return;
           done = true;
           try { ws.close(); } catch {}
           resolve(false);
         }, timeoutMs);
 
-        ws.onopen = () => {
+        function finish(ok) {
           if (done) return;
           done = true;
-          clearTimeout(t);
+          clearTimeout(timer);
           try { ws.close(); } catch {}
-          resolve(true);
+          resolve(!!ok);
+        }
+
+        ws.onopen = () => {};
+        ws.onmessage = async (event) => {
+          let data = null;
+          try {
+            data = JSON.parse(String(event?.data || ""));
+          } catch {
+            return;
+          }
+
+          if (String(data?.request || "") === "Hello") {
+            const auth = data?.authentication;
+            if (!auth?.salt || !auth?.challenge) {
+              finish(true);
+              return;
+            }
+            if (!password) {
+              finish(false);
+              return;
+            }
+            try {
+              authRequestId = makeId();
+              const authentication = await buildStreamerbotAuthentication(password, auth.salt, auth.challenge);
+              ws.send(JSON.stringify({
+                request: "Authenticate",
+                id: authRequestId,
+                authentication
+              }));
+            } catch {
+              finish(false);
+            }
+            return;
+          }
+
+          if (authRequestId && String(data?.id || "") === authRequestId) {
+            finish(String(data?.status || "").toLowerCase() === "ok");
+          }
         };
-        ws.onerror = () => {
-          if (done) return;
-          done = true;
-          clearTimeout(t);
-          try { ws.close(); } catch {}
-          resolve(false);
-        };
+        ws.onerror = () => finish(false);
       } catch {
         resolve(false);
       }
@@ -248,9 +441,28 @@
   AD_SB.connectOnceForTest = connectOnceForTest;
   AD_SB.ensureSBConnection = ensureSBConnection;
   AD_SB.disconnectSBConnection = disconnectSBConnection;
+  AD_SB.retrySBConnection = () => {
+    resetRetryState();
+    clearReconnectTimer();
+    if (sbSocket) {
+      try {
+        sbSocket.onopen = null;
+        sbSocket.onmessage = null;
+        sbSocket.onclose = null;
+        sbSocket.onerror = null;
+        sbSocket.close();
+      } catch {}
+      sbSocket = null;
+    }
+    sbConnecting = false;
+    sbHandshakeDone = false;
+    ensureSBConnection();
+  };
   AD_SB.refreshRuntimeConnections = () => {
     if (shouldUseStreamerbot()) ensureSBConnection();
     else disconnectSBConnection("disabled");
+    try { AD_SB.refreshObsConnection?.(); } catch {}
   };
   AD_SB.getSBStatus = getSBStatus;
+  AD_SB.sha256Base64 = sha256Base64;
 })(self);

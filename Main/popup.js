@@ -5,8 +5,9 @@ let SETTINGS = null;
 let CURRENT_PAGE = "";
 let SEARCH = "";
 let ACTIVE_MODULES = [];
-let SB_STATUS_TIMER = null;
-const WEBSITE_URL = "http://127.0.0.1:8080/";
+let CONNECTION_STATUS_TIMER = null;
+const DEFAULT_WEBSITE_API_URL = "https://autodarts-modules-production.up.railway.app";
+const WEBSITE_URL = `${DEFAULT_WEBSITE_API_URL}/`;
 
 const MODULE_ORDER = ["effects", "overlay", "wled", "caller", "obszoom", "macros", "websitedesign", "community", "liga"];
 const WEBSITE_ICON_COLOR = "assets/ICON.png";
@@ -32,7 +33,7 @@ function normalizePrefix(p) {
 }
 
 function normalizeWebsiteApiUrl(url) {
-  return String(url || "http://127.0.0.1:8080").trim().replace(/\/+$/, "");
+  return String(url || DEFAULT_WEBSITE_API_URL).trim().replace(/\/+$/, "");
 }
 
 function getWebsiteAccountUrl() {
@@ -188,16 +189,7 @@ function getLastPageOrDefault() {
   }
 }
 
-function clearInvalidLastPageIfNeeded(installedModules) {
-  try {
-    const saved = String(localStorage.getItem(LAST_PAGE_STORAGE_KEY) || "").trim().toLowerCase();
-    if (!saved || saved === "settings") return;
-    const installed = normalizeInstalledModules(installedModules);
-    if (!installed.includes(saved)) {
-      localStorage.setItem(LAST_PAGE_STORAGE_KEY, "settings");
-    }
-  } catch {}
-}
+function clearInvalidLastPageIfNeeded() {}
 
 function applySearchFilter(query) {
   SEARCH = String(query || "").trim().toLowerCase();
@@ -242,41 +234,68 @@ function bindAuto(root, id, key, type = "checkbox") {
   });
 }
 
-function applyStatusToPill(pill, status) {
-  if (!pill) return;
+function bindAutoImmediate(root, id, key, transform = (value) => value, delayMs = 250) {
+  const el = root.querySelector(`#${id}`);
+  if (!el) return;
+  let timer = null;
+  const commit = async () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    await savePartial({ [key]: transform(el.value) });
+  };
+  el.addEventListener("input", () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      void commit();
+    }, delayMs);
+  });
+  el.addEventListener("change", () => {
+    void commit();
+  });
+}
+
+function getConnectionStatusText(status) {
+  return "";
+}
+
+function applyConnectionStatusField(field, status) {
+  if (!field) return;
   const state = String(status?.state || "unknown").toLowerCase();
-  pill.classList.remove("connected", "disconnected");
-  if (state === "connected") {
-    pill.textContent = t("status_connected");
-    pill.classList.add("connected");
-    return;
+  const exhausted = !!status?.exhausted;
+  field.classList.remove("connected", "disconnected", "connecting", "exhausted");
+  if (state === "connected") field.classList.add("connected");
+  else if (state === "connecting") field.classList.add("connecting");
+  else if (state === "disconnected") field.classList.add("disconnected");
+  if (exhausted) field.classList.add("exhausted");
+
+  const textEl = field.querySelector("[data-connection-status-text]");
+  const attemptsEl = field.querySelector("[data-connection-attempts]");
+  if (textEl) textEl.textContent = getConnectionStatusText(status);
+  if (attemptsEl) {
+    const attempts = Number(status?.attempts || 0);
+    const state = String(status?.state || "unknown").toLowerCase();
+    if (attempts > 0) attemptsEl.textContent = `${attempts}/5`;
+    else if (state === "connected") attemptsEl.textContent = "";
+    else attemptsEl.textContent = "";
   }
-  if (state === "connecting") {
-    pill.textContent = t("status_connecting");
-    return;
-  }
-  if (state === "disconnected") {
-    pill.textContent = t("status_disconnected");
-    pill.classList.add("disconnected");
-    return;
-  }
-  pill.textContent = t("status_unknown");
 }
 
-function applySbStatus(status, id = "wsStatus") {
-  applyStatusToPill($(id), status);
-}
+async function refreshConnectionStatuses() {
+  const sbFields = $$("[data-sb-status]");
+  const obsFields = $$("[data-obs-status]");
+  if (!sbFields.length && !obsFields.length) return;
 
-async function refreshSbStatus() {
-  const ids = ["wsStatus", "overlaySbStatus"];
-  if (!ids.some((id) => !!$(id))) return;
-  try {
-    const res = await send({ type: "GET_SB_STATUS" });
-    const status = res?.ok ? res.status : { state: "unknown" };
-    ids.forEach((id) => applySbStatus(status, id));
-  } catch {
-    ids.forEach((id) => applySbStatus({ state: "unknown" }, id));
-  }
+  const [sbRes, obsRes] = await Promise.all([
+    sbFields.length ? send({ type: "GET_SB_STATUS" }).catch(() => ({ ok: false })) : Promise.resolve(null),
+    obsFields.length ? send({ type: "GET_OBS_STATUS" }).catch(() => ({ ok: false })) : Promise.resolve(null)
+  ]);
+
+  const sbStatus = sbRes?.ok ? sbRes.status : { state: "unknown" };
+  const obsStatus = obsRes?.ok ? obsRes.status : { state: "unknown" };
+  sbFields.forEach((field) => applyConnectionStatusField(field, sbStatus));
+  obsFields.forEach((field) => applyConnectionStatusField(field, obsStatus));
 }
 
 function parseIniBoolean(raw) {
@@ -320,7 +339,9 @@ function parseIniSettings(text) {
   const modules = sections.modules || sections.addons || {};
 
   if (sb.sbUrl) partial.sbUrl = sb.sbUrl;
+  if (sb.sbPassword !== undefined) partial.sbPassword = sb.sbPassword;
   if (sb.obsUrl) partial.obsUrl = sb.obsUrl;
+  if (sb.obsPassword !== undefined) partial.obsPassword = sb.obsPassword;
   if (sb.actionPrefix !== undefined) partial.actionPrefix = normalizePrefix(sb.actionPrefix);
   if (toggles.uiLanguage !== undefined) partial.uiLanguage = String(toggles.uiLanguage).toLowerCase() === "en" ? "en" : "de";
 
@@ -329,9 +350,10 @@ function parseIniSettings(text) {
   }
 
   const boolKeys = [
-    "enabled",
     "onlyMyThrows",
+    "debugAllLogs",
     "debugActions",
+    "debugObs",
     "debugGameEvents"
   ];
   const moduleIniSpec = collectModuleIniSpec();
@@ -380,11 +402,12 @@ function toIniText(s) {
     "",
     "[streamerbot]",
     `sbUrl=${settings.sbUrl || "ws://127.0.0.1:8080/"}`,
+    `sbPassword=${settings.sbPassword || ""}`,
     `obsUrl=${settings.obsUrl || "ws://127.0.0.1:4455/"}`,
+    `obsPassword=${settings.obsPassword || ""}`,
     `actionPrefix=${(settings.actionPrefix || "AD-SB ").trim()}`,
     "",
     "[toggles]",
-    `enabled=${asBool(settings.enabled)}`,
     `onlyMyThrows=${asBool(settings.onlyMyThrows)}`,
     `myPlayerIndex=${Number.isFinite(settings.myPlayerIndex) ? settings.myPlayerIndex : 0}`,
     `uiLanguage=${String(settings.uiLanguage || "de").toLowerCase() === "en" ? "en" : "de"}`,
@@ -392,7 +415,9 @@ function toIniText(s) {
     ...moduleToggleBoolLines,
     ...moduleToggleNumberLines,
     "",
+    `debugAllLogs=${asBool(settings.debugAllLogs)}`,
     `debugActions=${asBool(settings.debugActions)}`,
+    `debugObs=${asBool(settings.debugObs)}`,
     `debugGameEvents=${asBool(settings.debugGameEvents)}`,
     "",
     "[modules_config]",
@@ -486,6 +511,60 @@ function collectFeatureNeeds(modules) {
   return needs;
 }
 
+function setModuleToggleTitle(input, enabled) {
+  if (!input) return;
+  input.title = enabled ? "Modul deaktivieren" : "Modul aktivieren";
+  input.setAttribute("aria-label", input.title);
+}
+
+function syncModulePageState(page, enabled) {
+  if (!page) return;
+  page.classList.toggle("pageDisabled", !enabled);
+  const toggle = page.querySelector("[data-module-toggle]");
+  if (toggle) {
+    toggle.checked = !!enabled;
+    setModuleToggleTitle(toggle, !!enabled);
+  }
+}
+
+function decorateModulePage(page, module, enabled) {
+  if (!page || page.querySelector(".modulePageHeader")) {
+    syncModulePageState(page, enabled);
+    return;
+  }
+
+  const content = document.createElement("div");
+  content.className = "modulePageBody";
+  while (page.firstChild) content.appendChild(page.firstChild);
+
+  const header = document.createElement("div");
+  header.className = "modulePageHeader";
+  header.innerHTML = `
+    <div class="modulePageHeaderMain"></div>
+    <label class="switch switchCompact modulePageSwitch">
+      <input type="checkbox" data-module-toggle="${module.id}" />
+      <span class="slider"></span>
+    </label>
+  `;
+
+  const title = content.querySelector(".title");
+  const headerMain = header.querySelector(".modulePageHeaderMain");
+  if (title && headerMain) headerMain.appendChild(title);
+
+  const toggle = header.querySelector("[data-module-toggle]");
+  setModuleToggleTitle(toggle, enabled);
+  toggle.addEventListener("change", async () => {
+    const current = normalizeInstalledModules(SETTINGS?.installedModules || []);
+    const next = new Set(current);
+    if (toggle.checked) next.add(module.id);
+    else next.delete(module.id);
+    await savePartial({ installedModules: Array.from(next) });
+  });
+
+  page.append(header, content);
+  syncModulePageState(page, enabled);
+}
+
 function apiFor(root) {
   return {
     root,
@@ -494,13 +573,15 @@ function apiFor(root) {
     getSettings: () => SETTINGS,
     savePartial,
     bindAuto,
+    bindAutoImmediate,
     setChecked,
     setValue,
     normalizePrefix,
     parseIniSettings,
     toIniText,
     buildIniFiles,
-    refreshSbStatus,
+    refreshSbStatus: refreshConnectionStatuses,
+    refreshConnectionStatuses,
     callWebsiteApi,
     normalizeWebsiteApiUrl,
     getWebsiteAccountUrl,
@@ -510,11 +591,11 @@ function apiFor(root) {
 }
 
 function startSbStatusTimer() {
-  if (SB_STATUS_TIMER) clearInterval(SB_STATUS_TIMER);
-  SB_STATUS_TIMER = null;
-  if (!$("wsStatus") && !$("overlaySbStatus")) return;
-  refreshSbStatus();
-  SB_STATUS_TIMER = setInterval(refreshSbStatus, 1200);
+  if (CONNECTION_STATUS_TIMER) clearInterval(CONNECTION_STATUS_TIMER);
+  CONNECTION_STATUS_TIMER = null;
+  if (!$$("[data-sb-status]").length && !$$("[data-obs-status]").length) return;
+  refreshConnectionStatuses();
+  CONNECTION_STATUS_TIMER = setInterval(refreshConnectionStatuses, 1200);
 }
 
 function setModuleShellState(hasModules) {
@@ -587,7 +668,7 @@ async function refreshWebsiteAccessState(btn) {
   btn.setAttribute("aria-label", "Website");
 }
 
-function buildModuleLayout(settings) {
+function buildModuleLayout(settings, preferredPage = "") {
   const host = $("moduleHost");
   const nav = $("moduleNav");
   if (!host || !nav) return;
@@ -628,8 +709,8 @@ function buildModuleLayout(settings) {
     const page = document.createElement("section");
     page.className = "page";
     page.dataset.page = module.id;
-    page.classList.toggle("pageDisabled", !installedSet.has(module.id));
     page.innerHTML = module.render({ needs });
+    decorateModulePage(page, module, installedSet.has(module.id));
     host.appendChild(page);
 
     const btn = createNavButton(
@@ -653,7 +734,7 @@ function buildModuleLayout(settings) {
     module.sync?.(apiFor(page), settings);
   }
 
-  setPage(getLastPageOrDefault());
+  setPage(preferredPage || CURRENT_PAGE || getLastPageOrDefault());
   applyI18n();
   applySearchFilter($("searchInput")?.value || "");
   startSbStatusTimer();
@@ -668,20 +749,22 @@ function syncActiveModules(settings) {
   for (const module of ACTIVE_MODULES) {
     const page = document.querySelector(`.page[data-page="${module.id}"]`);
     if (!page) continue;
+    syncModulePageState(page, getInstalledModuleSet(settings?.installedModules).has(module.id));
     module.sync?.(apiFor(page), settings);
   }
   applyI18n();
-  refreshSbStatus();
+  refreshConnectionStatuses();
 }
 
 async function savePartial(partial) {
+  const activePageBeforeSave = CURRENT_PAGE;
   const prev = normalizeInstalledModules(SETTINGS?.installedModules).join(",");
   const res = await send({ type: "SET_SETTINGS", settings: partial || {} });
   if (!res?.ok || !res.settings) return;
   const next = normalizeInstalledModules(res.settings.installedModules).join(",");
   SETTINGS = res.settings;
   if (prev !== next) {
-    buildModuleLayout(SETTINGS);
+    buildModuleLayout(SETTINGS, activePageBeforeSave);
     return;
   }
   syncActiveModules(SETTINGS);
@@ -701,7 +784,7 @@ async function init() {
   SETTINGS = res?.ok ? res.settings : {};
   buildModuleLayout(SETTINGS);
   window.addEventListener("beforeunload", () => {
-    if (SB_STATUS_TIMER) clearInterval(SB_STATUS_TIMER);
+    if (CONNECTION_STATUS_TIMER) clearInterval(CONNECTION_STATUS_TIMER);
   }, { once: true });
 }
 

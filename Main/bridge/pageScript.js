@@ -657,6 +657,28 @@
     return String(value || "").replace(/\s+/g, " ").trim();
   }
 
+  function normalizeCheckoutSegmentToken(value) {
+    const normalized = normalizeText(value).toUpperCase();
+    if (!normalized) return "";
+    if (normalized === "BULL" || normalized === "SBULL" || normalized === "25") return "BULL";
+    if (normalized === "DBULL" || normalized === "50") return "DBULL";
+    const match = normalized.match(/^([SDT])\s*(\d{1,2})$/);
+    if (!match) return "";
+    const number = Number(match[2]);
+    if (!Number.isFinite(number) || number < 1 || number > 20) return "";
+    return `${match[1]}${number}`;
+  }
+
+  function extractCheckoutSegmentsFromText(value) {
+    const normalized = normalizeText(value);
+    if (!normalized) return [];
+    const matches = normalized.match(/\b(?:[SDT]\s*\d{1,2}|DBULL|SBULL|BULL|25|50)\b/gi) || [];
+    return matches
+      .map((item) => normalizeCheckoutSegmentToken(item))
+      .filter(Boolean)
+      .slice(0, 3);
+  }
+
   function looksCheckoutText(text) {
     const normalized = normalizeText(text);
     if (!normalized || normalized.length < 2 || normalized.length > 120) return false;
@@ -668,7 +690,75 @@
       lower.includes("bogey") ||
       lower.includes("to go")
     ) return true;
-    return /\b(?:t|d|s)?(?:20|19|18|17|16|15|14|13|12|11|10|9|8|7|6|5|4|3|2|1|25)\b/i.test(normalized);
+    return extractCheckoutSegmentsFromText(normalized).length > 0;
+  }
+
+  function extractSuggestionTextFromNode(node) {
+    if (!node || typeof node.querySelectorAll !== "function") return "";
+    const textNodes = Array.from(node.querySelectorAll("div, span, p, strong, small"))
+      .map((child) => normalizeText(child.textContent || ""))
+      .filter(Boolean);
+    const segments = textNodes
+      .map((text) => extractCheckoutSegmentsFromText(text))
+      .filter((items) => items.length === 1)
+      .map((items) => items[0]);
+    if (!segments.length) return "";
+
+    const scoreText = textNodes.find((text) => /^\d{1,3}$/.test(text)) || "";
+    const limitedSegments = segments.slice(0, 3);
+    return normalizeText([scoreText, ...limitedSegments].filter(Boolean).join(" "));
+  }
+
+  function collectCheckoutTextsFromSuggestionNodes() {
+    const out = [];
+    const seen = new Set();
+    const selectors = [
+      ".suggestion",
+      "[class*='suggestion']",
+      "[data-testid*='suggest']",
+      "[data-testid*='checkout']"
+    ];
+    for (const selector of selectors) {
+      const nodes = document.querySelectorAll(selector);
+      for (const node of nodes) {
+        const suggestionText = extractSuggestionTextFromNode(node);
+        if (!suggestionText || !looksCheckoutText(suggestionText)) continue;
+        const key = suggestionText.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(suggestionText);
+        if (out.length >= 8) return out;
+      }
+    }
+    return out;
+  }
+
+  function collectCheckoutTextsFromSegmentGroups() {
+    const candidates = [];
+    const seen = new Set();
+    const parents = document.querySelectorAll("div, section, article, aside, li");
+    for (const parent of parents) {
+      const elementChildren = Array.from(parent.children || []).filter((child) => child && child.nodeType === 1);
+      if (elementChildren.length < 2 || elementChildren.length > 6) continue;
+      const segments = [];
+      for (const child of elementChildren) {
+        const childText = normalizeText(child.textContent || "");
+        const childSegments = extractCheckoutSegmentsFromText(childText);
+        if (childSegments.length !== 1) {
+          segments.length = 0;
+          break;
+        }
+        segments.push(childSegments[0]);
+      }
+      if (segments.length < 2 || segments.length > 3) continue;
+      const combined = segments.join(" ");
+      const key = combined.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(combined);
+      if (candidates.length >= 8) return candidates;
+    }
+    return candidates;
   }
 
   function dedupeObservedState(payload) {
@@ -681,6 +771,7 @@
       l: payload?.leg,
       w: payload?.winner,
       c: payload?.checkoutGuide,
+      remaining: payload?.remainingScore ?? null,
       scores: payload?.playerScores
     });
     const now = Date.now();
@@ -704,6 +795,7 @@
       gameFinished: !!stateLike.gameFinished,
       winner: stateLike.winner ?? null,
       checkoutGuide: stateLike.checkoutGuide ?? null,
+      remainingScore: Number.isFinite(Number(stateLike.remainingScore)) ? Number(stateLike.remainingScore) : null,
       playerScores: Array.isArray(stateLike.playerScores) ? stateLike.playerScores : null,
       raw: {
         source,
@@ -715,6 +807,7 @@
       !!payload.matchId ||
       payload.player !== null ||
       !!payload.checkoutGuide ||
+      Number.isFinite(payload.remainingScore) ||
       (Array.isArray(payload.playerScores) && payload.playerScores.some((x) => Number.isFinite(Number(x))));
     if (!hasUsefulData) return;
     if (dedupeObservedState(payload)) return;
@@ -722,13 +815,14 @@
   }
 
   function collectCheckoutTextsFromDom() {
+    const suggestionTexts = collectCheckoutTextsFromSuggestionNodes();
+    if (suggestionTexts.length) return suggestionTexts;
+
     const selectors = [
       "[data-testid*='checkout']",
       "[data-testid*='finish']",
-      "[data-testid*='suggest']",
       "[class*='checkout']",
       "[class*='finish']",
-      "[class*='suggest']",
       "[id*='checkout']",
       "[id*='finish']"
     ];
@@ -746,7 +840,42 @@
         if (out.length >= 8) return out;
       }
     }
+    for (const text of collectCheckoutTextsFromSegmentGroups()) {
+      const key = text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(text);
+      if (out.length >= 8) return out;
+    }
     return out;
+  }
+
+  function collectPrimaryRemainingScoreFromDom() {
+    const candidates = [];
+    const nodes = document.querySelectorAll("div, span, p, strong, h1, h2, h3");
+    for (const node of nodes) {
+      const text = normalizeText(node?.textContent || "");
+      if (!/^\d{2,3}$/.test(text)) continue;
+      if (node.closest?.(".suggestion, [class*='suggestion'], [data-testid*='suggest'], [data-testid*='checkout']")) continue;
+      const value = Number(text);
+      if (!Number.isFinite(value) || value < 2 || value > 501) continue;
+      let style;
+      try {
+        style = window.getComputedStyle(node);
+      } catch {
+        style = null;
+      }
+      const fontSize = Number.parseFloat(style?.fontSize || "0") || 0;
+      const fontWeight = Number.parseInt(style?.fontWeight || "0", 10) || 0;
+      if (fontSize < 40 && fontWeight < 700) continue;
+      candidates.push({ value, fontSize, fontWeight });
+    }
+    candidates.sort((a, b) => {
+      if (b.fontSize !== a.fontSize) return b.fontSize - a.fontSize;
+      if (b.fontWeight !== a.fontWeight) return b.fontWeight - a.fontWeight;
+      return b.value - a.value;
+    });
+    return candidates[0]?.value ?? null;
   }
 
   function readScoresFromObjectCollection(collection) {
@@ -839,9 +968,11 @@
 
   function scanDomStateCandidates(reason = "dom_scan") {
     const checkoutTexts = collectCheckoutTextsFromDom();
-    if (!checkoutTexts.length) return;
+    const remainingScore = collectPrimaryRemainingScoreFromDom();
+    if (!checkoutTexts.length && !Number.isFinite(remainingScore)) return;
     emitObservedState("dom_checkout", {
-      checkoutGuide: checkoutTexts[0],
+      checkoutGuide: checkoutTexts[0] || null,
+      remainingScore,
       raw: {
         reason,
         checkoutCandidates: checkoutTexts,

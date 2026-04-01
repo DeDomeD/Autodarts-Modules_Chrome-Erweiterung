@@ -3,7 +3,6 @@
   configs.websitedesign = {
     id: "websitedesign",
     defaults: {
-      websiteDesignEnabled: false,
       websiteLayout: "horizontal",
       websiteTheme: "classic",
       websiteArenaPrimaryHue: 210,
@@ -16,7 +15,7 @@
       websiteCommunityFavorites: "[]"
     },
     ini: {
-      togglesBool: ["websiteDesignEnabled", "websiteThemeBuilderEnabled", "websiteDartboardGlowEnabled"],
+      togglesBool: ["websiteThemeBuilderEnabled", "websiteDartboardGlowEnabled"],
       togglesNumber: {
         websiteArenaPrimaryHue: 210,
         websiteArenaSecondaryHue: 155

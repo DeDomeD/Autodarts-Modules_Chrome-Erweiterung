@@ -61,8 +61,10 @@
     return /^https:\/\/play\.autodarts\.io\/?/i.test(String(url || ""));
   }
 
+  const DEFAULT_WEBSITE_API_URL = "https://autodarts-modules-production.up.railway.app";
+
   function normalizeWebsiteApiUrl(url) {
-    return String(url || "http://127.0.0.1:8080").trim().replace(/\/+$/, "");
+    return String(url || DEFAULT_WEBSITE_API_URL).trim().replace(/\/+$/, "");
   }
 
   async function startGoogleAuthFlow(baseUrlRaw) {
@@ -301,7 +303,7 @@
           }
 
           if (msg?.type === "SB_TEST") {
-            const ok = await AD_SB.connectOnceForTest(settings.sbUrl);
+            const ok = await AD_SB.connectOnceForTest(settings.sbUrl, settings.sbPassword);
             logInfo("sb", "connection test", { url: settings.sbUrl, ok });
             sendResponse({ ok });
             return;
@@ -312,6 +314,11 @@
             return;
           }
 
+          if (msg?.type === "GET_OBS_STATUS") {
+            sendResponse({ ok: true, status: AD_SB.getObsStatus?.() || { state: "unknown" } });
+            return;
+          }
+
           if (msg?.type === "START_GOOGLE_AUTH") {
             const result = await startGoogleAuthFlow(msg?.baseUrl || settings.websiteApiUrl);
             sendResponse({ ok: true, ...result, settings: AD_SB.getSettings() });
@@ -319,9 +326,69 @@
           }
 
           if (msg?.type === "OBS_TEST") {
-            const ok = await AD_SB.connectOnceForTest(settings.obsUrl);
+            const ok = await AD_SB.retryObsConnection?.();
             logInfo("system", "obs test", { url: settings.obsUrl, ok });
             sendResponse({ ok });
+            return;
+          }
+
+          if (msg?.type === "SB_RETRY") {
+            AD_SB.retrySBConnection?.();
+            sendResponse({ ok: true });
+            return;
+          }
+
+          if (msg?.type === "OBS_RETRY") {
+            const ok = await AD_SB.retryObsConnection?.();
+            sendResponse({ ok: !!ok });
+            return;
+          }
+
+          if (msg?.type === "OBS_GET_SCENES") {
+            const scenes = await AD_SB.getObsScenes?.();
+            sendResponse({ ok: true, scenes });
+            return;
+          }
+
+          if (msg?.type === "OBS_GET_SCENE_SOURCES") {
+            const sources = await AD_SB.getObsSceneSources?.(msg?.sceneName);
+            sendResponse({ ok: true, sources });
+            return;
+          }
+
+          if (msg?.type === "OBS_CREATE_MOVE_FILTERS") {
+            const result = await AD_SB.createObsMoveFilters?.(msg?.sceneName, msg?.sourceName, {
+              mode: msg?.mode,
+              duration: msg?.duration,
+              easing: msg?.easing,
+              easingFunction: msg?.easingFunction,
+              includeSingles: msg?.includeSingles,
+              includeDoubles: msg?.includeDoubles,
+              includeTriples: msg?.includeTriples
+            });
+            sendResponse({ ok: true, ...result });
+            return;
+          }
+
+          if (msg?.type === "OBS_DELETE_MOVE_FILTERS") {
+            const result = await AD_SB.deleteObsMoveFilters?.(msg?.sceneName, {
+              includeSingles: msg?.includeSingles,
+              includeDoubles: msg?.includeDoubles,
+              includeTriples: msg?.includeTriples
+            });
+            sendResponse({ ok: true, ...result });
+            return;
+          }
+
+          if (msg?.type === "OBS_EXPORT_MOVE_FILTER_BACKUP") {
+            const result = await AD_SB.getObsMoveFilterBackup?.(msg?.sceneName);
+            sendResponse({ ok: true, ...result });
+            return;
+          }
+
+          if (msg?.type === "OBS_IMPORT_MOVE_FILTER_BACKUP") {
+            const result = await AD_SB.importObsMoveFilterBackup?.(msg?.backup);
+            sendResponse({ ok: true, ...result });
             return;
           }
 
@@ -426,6 +493,7 @@
                 turnBusted: !!e.turnBusted,
                 gameFinished: !!e.gameFinished,
                 winner: e.winner ?? null,
+                checkoutGuide: e.checkoutGuide ?? null,
                 playerScores: Array.isArray(e.playerScores) ? e.playerScores : null
               });
             } else if (e.type === "event") {
@@ -446,12 +514,15 @@
                   ? lastPlayerNamesByIndex[idx]
                   : (idx !== null ? `Player ${idx + 1}` : "?");
               console.log(
-                `throw player=${pLabel} score=${e.score ?? "?"} segment=${e.segment ?? "?"}`
+                `[Bridge] throw player=${pLabel} score=${e.score ?? "?"} segment=${e.segment ?? "?"}`
               );
             }
 
             if (e.type === "throw") AD_SB.effects.handleThrow(e);
-            else if (e.type === "state") AD_SB.effects.handleState(e);
+            else if (e.type === "state") {
+              AD_SB.autodartsTriggers?.handleState?.(e);
+              AD_SB.effects.handleState(e);
+            }
             else if (e.type === "event") AD_SB.effects.handleGameEvent(e);
 
             sendResponse({ ok: true });
@@ -466,9 +537,7 @@
 
             if (settings.debugGameEvents) {
               const kind = msg?.payload?.kind || "unknown";
-              if (kind === "undo_click") {
-                console.log("undo");
-              } else {
+              if (kind !== "undo_click") {
                 console.log(`ui event kind="${kind}"`);
               }
             }
@@ -500,7 +569,7 @@
     try {
       AD_SB.refreshRuntimeConnections?.();
     } catch (e) {
-      logError("errors", "initial streamerbot connect failed", { error: String(e?.message || e) });
+      logError("errors", "initial connection refresh failed", { error: String(e?.message || e) });
     }
     logInfo("system", "service worker initialized", {});
   };

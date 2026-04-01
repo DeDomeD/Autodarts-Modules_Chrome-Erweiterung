@@ -217,7 +217,7 @@
 
   async function handleActionTrigger(actionKey, args = {}) {
     const settings = AD_SB.getSettings?.() || {};
-    if (!settings.enabled || !settings.wledEnabled) return;
+    if (!settings.wledEnabled) return;
 
     const key = normalizeTriggerKey(actionKey);
     if (!key) return;

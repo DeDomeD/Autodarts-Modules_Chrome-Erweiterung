@@ -1,39 +1,6 @@
 (function initMainSettingsPage(scope) {
   let ACCOUNT_STATUS_TEXT = "";
-
-  function getInstalledModuleSet(settings) {
-    return new Set((Array.isArray(settings?.installedModules) ? settings.installedModules : [])
-      .map((item) => String(item || "").trim().toLowerCase())
-      .filter(Boolean));
-  }
-
-  function getModuleEntries() {
-    const modules = scope.AD_SB_MODULES || {};
-    const order = ["effects", "overlay", "wled", "caller", "obszoom", "macros", "websitedesign", "community", "liga"];
-    return order
-      .map((id) => modules[id])
-      .filter((module) => module && module.id);
-  }
-
-  function renderAddonToggleList(context = {}) {
-    const installed = getInstalledModuleSet(context.settings || {});
-    return `
-      <div class="list">
-        ${getModuleEntries().map((module) => `
-          <div class="listToggle">
-            <div class="liText">
-              <div class="liTitle">${context.t?.(module.navLabelKey || `nav_${module.id}`) || module.id}</div>
-              <div class="liSub">${module.id}</div>
-            </div>
-            <label class="switch">
-              <input type="checkbox" data-addon-toggle="${module.id}" ${installed.has(module.id) ? "checked" : ""} />
-              <span class="slider"></span>
-            </label>
-          </div>
-        `).join("")}
-      </div>
-    `;
-  }
+  const DEFAULT_WEBSITE_API_URL = "https://autodarts-modules-production.up.railway.app";
 
   scope.AD_SB_MAIN_SETTINGS = {
     id: "settings",
@@ -45,18 +12,6 @@
 
         <div class="sectionTitle" data-i18n="section_general">General</div>
         <div class="card">
-          <div class="list">
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle" data-i18n="enabled_title">Enabled</div>
-                <div class="liSub" data-i18n="enabled_sub">Master switch for all triggers</div>
-              </div>
-              <label class="switch">
-                <input id="enabled" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
           <div class="formRow">
             <label class="label" for="uiLanguage" data-i18n="language_label">Language</label>
             <select class="input" id="uiLanguage">
@@ -67,18 +22,12 @@
           </div>
         </div>
 
-        <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_addons">Addons</div>
-        <div class="card">
-          <div class="hint" data-i18n="addons_hint">Hier kannst du einzelne Addons ein- oder ausschalten. Deaktivierte Addons bleiben sichtbar, wirken aber grauer.</div>
-          <div id="addonsListMount">${renderAddonToggleList({ settings: context.settings || {}, t: context.t })}</div>
-        </div>
-
         <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_account">Account</div>
         <div class="card">
           <div class="formRow">
             <label class="label" for="websiteApiUrl" data-i18n="website_api_url_label">Website API URL</label>
-            <input class="input" id="websiteApiUrl" type="text" placeholder="http://127.0.0.1:8080" />
-            <div class="hint" data-i18n="website_api_url_hint">Standard fuer Website-Account und Extension-Login ist http://127.0.0.1:8080</div>
+            <input class="input" id="websiteApiUrl" type="text" placeholder="${DEFAULT_WEBSITE_API_URL}" />
+            <div class="hint" data-i18n="website_api_url_hint">Standard fuer Website-Account und Extension-Login ist ${DEFAULT_WEBSITE_API_URL}</div>
           </div>
 
           <div class="divider"></div>
@@ -135,7 +84,7 @@
           <div class="formRow">
             <label class="label" for="myPlayerIndex" data-i18n="label_my_player_index">My player index</label>
             <input class="input" id="myPlayerIndex" type="number" min="0" step="1" />
-            <div class="hint" data-i18n="hint_my_player_index">Used when enabled.</div>
+            <div class="hint" data-i18n="hint_my_player_index">Used for the throw filter.</div>
           </div>
         </div>
 
@@ -144,11 +93,33 @@
           <div class="list">
             <div class="listToggle">
               <div class="liText">
+                <div class="liTitle" data-i18n="debug_all_logs_title">Alle Logs</div>
+                <div class="liSub" data-i18n="debug_all_logs_sub">Zeigt alle Worker-Logs, auch ausgeblendete Debug-Zeilen</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="debugAllLogs" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="listToggle">
+              <div class="liText">
                 <div class="liTitle" data-i18n="debug_actions_title">Debug: Actions</div>
                 <div class="liSub" data-i18n="debug_actions_sub">Console logs for actions</div>
               </div>
               <label class="switch">
                 <input type="checkbox" id="debugActions" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="listToggle">
+              <div class="liText">
+                <div class="liTitle" data-i18n="debug_obs_title">Debug: OBS</div>
+                <div class="liSub" data-i18n="debug_obs_sub">Console logs for OBS connection and requests</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="debugObs" />
                 <span class="slider"></span>
               </label>
             </div>
@@ -185,14 +156,6 @@
     },
     bind(api) {
       const root = api.root;
-
-      async function updateInstalledModules(moduleId, isEnabled) {
-        const current = api.normalizeInstalledModules(api.getSettings?.()?.installedModules || []);
-        const set = new Set(current);
-        if (isEnabled) set.add(moduleId);
-        else set.delete(moduleId);
-        await api.savePartial({ installedModules: Array.from(set) });
-      }
 
       async function saveAccountSession(data, statusText) {
         const nextUser = data?.user || null;
@@ -285,14 +248,6 @@
         window.open(url, "_blank");
       });
 
-      root.addEventListener("change", async (ev) => {
-        const target = ev.target;
-        if (!target?.matches?.("[data-addon-toggle]")) return;
-        const moduleId = String(target.dataset.addonToggle || "").trim().toLowerCase();
-        if (!moduleId) return;
-        await updateInstalledModules(moduleId, !!target.checked);
-      });
-
       root.querySelector("#btnLoadIni")?.addEventListener("click", () => {
         const input = root.querySelector("#iniFileInput");
         if (!input) return;
@@ -380,26 +335,25 @@
         }
       });
 
-      api.bindAuto(root, "enabled", "enabled");
       api.bindAuto(root, "uiLanguage", "uiLanguage", "text");
       api.bindAuto(root, "onlyMyThrows", "onlyMyThrows");
       api.bindAuto(root, "myPlayerIndex", "myPlayerIndex", "number");
+      api.bindAuto(root, "debugAllLogs", "debugAllLogs");
       api.bindAuto(root, "debugActions", "debugActions");
+      api.bindAuto(root, "debugObs", "debugObs");
       api.bindAuto(root, "debugGameEvents", "debugGameEvents");
     },
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
-      api.setValue(root, "websiteApiUrl", s.websiteApiUrl || "http://127.0.0.1:8080");
-      api.setChecked(root, "enabled", !!s.enabled);
+      api.setValue(root, "websiteApiUrl", s.websiteApiUrl || DEFAULT_WEBSITE_API_URL);
       api.setValue(root, "uiLanguage", String(s.uiLanguage || "de").toLowerCase() === "en" ? "en" : "de");
       api.setChecked(root, "onlyMyThrows", !!s.onlyMyThrows);
       api.setValue(root, "myPlayerIndex", Number.isFinite(s.myPlayerIndex) ? s.myPlayerIndex : 0);
+      api.setChecked(root, "debugAllLogs", !!s.debugAllLogs);
       api.setChecked(root, "debugActions", !!s.debugActions);
+      api.setChecked(root, "debugObs", !!s.debugObs);
       api.setChecked(root, "debugGameEvents", !!s.debugGameEvents);
-
-      const addonsMount = root.querySelector("#addonsListMount");
-      if (addonsMount) addonsMount.innerHTML = renderAddonToggleList({ settings: s, t: api.t });
 
       const statusEl = root.querySelector("#iniStatus");
       if (statusEl && !statusEl.textContent) statusEl.textContent = api.t("status_idle");

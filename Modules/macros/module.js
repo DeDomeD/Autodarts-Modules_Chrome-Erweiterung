@@ -14,17 +14,6 @@
           <div class="list">
             <div class="listToggle">
               <div class="liText">
-                <div class="liTitle" data-i18n="macros_enabled_title">Makro-Leiste aktivieren</div>
-                <div class="liSub" data-i18n="macros_enabled_sub">Blendet zusätzliche Buttons direkt auf der Autodarts Website ein</div>
-              </div>
-              <label class="switch">
-                <input id="macrosEnabled" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="listToggle">
-              <div class="liText">
                 <div class="liTitle" data-i18n="macros_team_mode_title">Teammodus anzeigen</div>
                 <div class="liSub" data-i18n="macros_team_mode_sub">Zeigt Team-Presets wie 1+3 gegen 2+4 direkt in der Makro-Leiste</div>
               </div>
@@ -72,13 +61,11 @@
     },
     bind(api) {
       const root = api.root;
-      api.bindAuto(root, "macrosEnabled", "macrosEnabled");
       api.bindAuto(root, "macrosTeamModeEnabled", "macrosTeamModeEnabled");
     },
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
-      api.setChecked(root, "macrosEnabled", !!s.macrosEnabled);
       api.setChecked(root, "macrosTeamModeEnabled", s.macrosTeamModeEnabled !== false);
     }
   };

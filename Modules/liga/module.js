@@ -114,19 +114,6 @@
       return `
         <h2 class="title"><span data-i18n="title_liga">Liga</span><span class="titleMeta">Own Platform</span></h2>
         <div class="card">
-          <div class="list">
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle">Liga-Modul aktiv</div>
-                <div class="liSub">Verwalte Liga-Daten, Spieltage und Match-Liste direkt im Popup.</div>
-              </div>
-              <label class="switch">
-                <input id="ligaEnabled" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-
           <div class="formRow">
             <label class="label" for="ligaName">Liga</label>
             <input class="input" id="ligaName" type="text" placeholder="z.B. Bezirksliga Nord" />
@@ -206,7 +193,6 @@
     },
     bind(api) {
       const root = api.root;
-      api.bindAuto(root, "ligaEnabled", "ligaEnabled");
       api.bindAuto(root, "ligaName", "ligaName", "text");
       api.bindAuto(root, "ligaSeason", "ligaSeason", "text");
       api.bindAuto(root, "ligaTeamName", "ligaTeamName", "text");
@@ -276,7 +262,6 @@
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
-      api.setChecked(root, "ligaEnabled", !!s.ligaEnabled);
       api.setValue(root, "ligaName", s.ligaName || "");
       api.setValue(root, "ligaSeason", s.ligaSeason || "");
       api.setValue(root, "ligaTeamName", s.ligaTeamName || "");

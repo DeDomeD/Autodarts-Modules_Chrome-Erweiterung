@@ -250,28 +250,53 @@
     needs: { streamerbot: true, obs: false },
     render() {
       return `
-        <h2 class="title"><span data-i18n="title_effects">Effects</span><span class="titleMeta">Streamer.bot/OBS</span> <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="effectsConnectionToggle" aria-label="Effects Verbindungen" title="Effects Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button></h2>
+        <h2 class="title"><span data-i18n="title_effects">Effects</span><span class="titleMeta">Streamer.bot/OBS</span></h2>
 
         <div class="card">
-          <div class="cardHeader">
-            <div class="cardTitle">Streamer.bot Verbindung</div>
-            <div class="pill" id="wsStatus" data-i18n="status_unknown">Unknown</div>
+          <div class="sectionHead">
+            <div class="sectionTitle" style="margin:0;" data-i18n="section_connections">Verbindungen</div>
+            <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="effectsConnectionToggle" aria-label="Effects Verbindungen" title="Effects Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button>
           </div>
-          <div class="hint">Effects nutzt Streamer.bot nur, wenn das Addon aktiv ist.</div>
+          <div class="connectionStatusGrid">
+            <button type="button" class="connectionStatusBtn" data-obs-status data-connection-retry="obs">
+              <div class="connectionStatusLabel">
+                <span>OBS</span>
+                <span class="connectionStatusText" data-connection-status-text></span>
+                <span class="connectionStatusAttempts" data-connection-attempts></span>
+              </div>
+            </button>
+            <button type="button" class="connectionStatusBtn" data-sb-status data-connection-retry="sb">
+              <div class="connectionStatusLabel">
+                <span>Streamer.bot</span>
+                <span class="connectionStatusText" data-connection-status-text></span>
+                <span class="connectionStatusAttempts" data-connection-attempts></span>
+              </div>
+            </button>
+          </div>
           <div class="inlinePopupWrap${CONNECTIONS_OPEN ? " open" : ""}" id="effectsConnectionWrap" style="padding:0; border-top:none; background:transparent;">
             <div class="formRow">
-              <label class="label" for="sbUrl" data-i18n="label_ws_url">WS URL</label>
+              <label class="label" for="obsUrl">OBS WS URL</label>
+              <input class="input" id="obsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
+              <div class="hint" data-i18n="hint_obs_ws">OBS WebSocket Server</div>
+            </div>
+            <div class="formRow">
+              <label class="label" for="obsPassword">OBS Passwort</label>
+              <input class="input" id="obsPassword" type="password" placeholder="optional" />
+            </div>
+            <div class="divider"></div>
+            <div class="formRow">
+              <label class="label" for="sbUrl">Streamer.bot WS URL</label>
               <input class="input" id="sbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
               <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
+            </div>
+            <div class="formRow">
+              <label class="label" for="sbPassword">Streamer.bot Passwort</label>
+              <input class="input" id="sbPassword" type="password" placeholder="optional" />
             </div>
             <div class="formRow">
               <label class="label" for="actionPrefix" data-i18n="label_action_prefix">Action Prefix</label>
               <input class="input" id="actionPrefix" type="text" placeholder="AD-SB " />
               <div class="hint" data-i18n="hint_action_prefix">Actions run as Prefix + Suffix.</div>
-            </div>
-            <div class="rowSplit">
-              <button id="btnSaveEffectsConn" class="btn" type="button">Speichern</button>
-              <button id="btnTestWS" class="btnPrimary" type="button" data-i18n="btn_test_streamerbot">Test Streamer.bot</button>
             </div>
           </div>
         </div>
@@ -461,16 +486,18 @@
         scope.AD_SB_MODULES.effects.sync(api, api.getSettings?.() || {});
       });
 
-      root.querySelector("#btnSaveEffectsConn")?.addEventListener("click", async () => {
-        await api.savePartial({
-          sbUrl: root.querySelector("#sbUrl")?.value?.trim() || "",
-          actionPrefix: api.normalizePrefix(root.querySelector("#actionPrefix")?.value || "")
+      api.bindAutoImmediate(root, "obsUrl", "obsUrl", (value) => String(value || "").trim());
+      api.bindAutoImmediate(root, "obsPassword", "obsPassword", (value) => String(value || ""));
+      api.bindAutoImmediate(root, "sbUrl", "sbUrl", (value) => String(value || "").trim());
+      api.bindAutoImmediate(root, "sbPassword", "sbPassword", (value) => String(value || ""));
+      api.bindAutoImmediate(root, "actionPrefix", "actionPrefix", (value) => api.normalizePrefix(value || ""));
+      root.querySelectorAll("[data-connection-retry]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const kind = String(button.dataset.connectionRetry || "");
+          if (kind === "sb") await api.send({ type: "SB_RETRY" });
+          if (kind === "obs") await api.send({ type: "OBS_RETRY" });
+          setTimeout(() => api.refreshConnectionStatuses?.(), 150);
         });
-      });
-
-      root.querySelector("#btnTestWS")?.addEventListener("click", async () => {
-        await api.send({ type: "SB_TEST" });
-        setTimeout(api.refreshSbStatus, 150);
       });
 
       root.querySelector("#missGuardPopupToggle")?.addEventListener("click", () => {
@@ -575,6 +602,9 @@
       ];
       ids.forEach((id) => api.setChecked(root, id, !!s[id]));
       api.setValue(root, "sbUrl", s.sbUrl || "");
+      api.setValue(root, "sbPassword", s.sbPassword || "");
+      api.setValue(root, "obsUrl", s.obsUrl || "");
+      api.setValue(root, "obsPassword", s.obsPassword || "");
       api.setValue(root, "actionPrefix", String(s.actionPrefix || "").trim());
       api.setValue(root, "missGuardThreshold", Number.isFinite(s.missGuardThreshold) ? s.missGuardThreshold : 40);
       const connectionWrap = root.querySelector("#effectsConnectionWrap");
@@ -598,7 +628,7 @@
       if (triggerPickerMount) triggerPickerMount.innerHTML = renderTriggerPickerGroups(s);
       const mount = root.querySelector("#customEffectsListMount");
       if (mount) mount.innerHTML = renderCustomEffectsList(s);
-      api.refreshSbStatus?.();
+      api.refreshConnectionStatuses?.();
     }
   };
 })(window);

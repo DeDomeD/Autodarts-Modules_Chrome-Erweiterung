@@ -9,23 +9,53 @@
     needs: { streamerbot: false, obs: false },
     render() {
       return `
-        <h2 class="title"><span data-i18n="title_overlay">Overlay</span><span class="titleMeta">OBS/Web</span> <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="overlayConnectionToggle" aria-label="Overlay Verbindungen" title="Overlay Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button></h2>
+        <h2 class="title"><span data-i18n="title_overlay">Overlay</span><span class="titleMeta">OBS/Web</span></h2>
 
         <div class="card">
-          <div class="cardHeader">
-            <div class="cardTitle">Streamer.bot fuer Overlay</div>
-            <div class="pill" id="overlaySbStatus" data-i18n="status_unknown">Unknown</div>
+          <div class="sectionHead">
+            <div class="sectionTitle" style="margin:0;" data-i18n="section_connections">Verbindungen</div>
+            <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="overlayConnectionToggle" aria-label="Overlay Verbindungen" title="Overlay Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button>
           </div>
-          <div class="hint">Die Overlay-Seite nutzt dieselbe Streamer.bot Verbindung wie deine Effects.</div>
+          <div class="connectionStatusGrid">
+            <button type="button" class="connectionStatusBtn" data-obs-status data-connection-retry="obs">
+              <div class="connectionStatusLabel">
+                <span>OBS</span>
+                <span class="connectionStatusText" data-connection-status-text></span>
+                <span class="connectionStatusAttempts" data-connection-attempts></span>
+              </div>
+            </button>
+            <button type="button" class="connectionStatusBtn" data-sb-status data-connection-retry="sb">
+              <div class="connectionStatusLabel">
+                <span>Streamer.bot</span>
+                <span class="connectionStatusText" data-connection-status-text></span>
+                <span class="connectionStatusAttempts" data-connection-attempts></span>
+              </div>
+            </button>
+          </div>
           <div class="inlinePopupWrap${CONNECTIONS_OPEN ? " open" : ""}" id="overlayConnectionWrap" style="padding:0; border-top:none; background:transparent;">
             <div class="formRow">
-              <label class="label" for="overlaySbUrl" data-i18n="label_ws_url">WS URL</label>
+              <label class="label" for="overlayObsUrl">OBS WS URL</label>
+              <input class="input" id="overlayObsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
+              <div class="hint" data-i18n="hint_obs_ws">OBS WebSocket Server</div>
+            </div>
+            <div class="formRow">
+              <label class="label" for="overlayObsPassword">OBS Passwort</label>
+              <input class="input" id="overlayObsPassword" type="password" placeholder="optional" />
+            </div>
+            <div class="divider"></div>
+            <div class="formRow">
+              <label class="label" for="overlaySbUrl">Streamer.bot WS URL</label>
               <input class="input" id="overlaySbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
               <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
             </div>
-            <div class="rowSplit">
-              <button id="btnSaveOverlayConn" class="btn" type="button">Speichern</button>
-              <button id="btnTestOverlayWS" class="btnPrimary" type="button" data-i18n="btn_test_streamerbot">Test Streamer.bot</button>
+            <div class="formRow">
+              <label class="label" for="overlaySbPassword">Streamer.bot Passwort</label>
+              <input class="input" id="overlaySbPassword" type="password" placeholder="optional" />
+            </div>
+            <div class="formRow">
+              <label class="label" for="overlayActionPrefix" data-i18n="label_action_prefix">Action Prefix</label>
+              <input class="input" id="overlayActionPrefix" type="text" placeholder="AD-SB " />
+              <div class="hint" data-i18n="hint_action_prefix">Actions run as Prefix + Suffix.</div>
             </div>
           </div>
 
@@ -36,17 +66,6 @@
           </div>
 
           <div class="list">
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle" data-i18n="enable_overlay_title">Enable Overlay</div>
-                <div class="liSub" data-i18n="enable_overlay_sub">Serve overlay data later</div>
-              </div>
-              <label class="switch">
-                <input id="overlayEnabled" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-
             <div class="formRow">
               <label class="label" for="overlayWsPort" data-i18n="label_port">Port</label>
               <input class="input" id="overlayWsPort" type="number" min="1" max="65535" step="1" />
@@ -68,16 +87,19 @@
         CONNECTIONS_OPEN = !CONNECTIONS_OPEN;
         scope.AD_SB_MODULES.overlay.sync(api, api.getSettings?.() || {});
       });
-      api.bindAuto(root, "overlayEnabled", "overlayEnabled");
       api.bindAuto(root, "overlayWsPort", "overlayWsPort", "number");
-      root.querySelector("#btnSaveOverlayConn")?.addEventListener("click", async () => {
-        await api.savePartial({
-          sbUrl: root.querySelector("#overlaySbUrl")?.value?.trim() || ""
+      api.bindAutoImmediate(root, "overlayObsUrl", "obsUrl", (value) => String(value || "").trim());
+      api.bindAutoImmediate(root, "overlayObsPassword", "obsPassword", (value) => String(value || ""));
+      api.bindAutoImmediate(root, "overlaySbUrl", "sbUrl", (value) => String(value || "").trim());
+      api.bindAutoImmediate(root, "overlaySbPassword", "sbPassword", (value) => String(value || ""));
+      api.bindAutoImmediate(root, "overlayActionPrefix", "actionPrefix", (value) => api.normalizePrefix(value || ""));
+      root.querySelectorAll("[data-connection-retry]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const kind = String(button.dataset.connectionRetry || "");
+          if (kind === "sb") await api.send({ type: "SB_RETRY" });
+          if (kind === "obs") await api.send({ type: "OBS_RETRY" });
+          setTimeout(() => api.refreshConnectionStatuses?.(), 150);
         });
-      });
-      root.querySelector("#btnTestOverlayWS")?.addEventListener("click", async () => {
-        await api.send({ type: "SB_TEST" });
-        setTimeout(api.refreshSbStatus, 150);
       });
       root.querySelector("#btnOpenOverlay")?.addEventListener("click", () => {
         const sbws = encodeURIComponent(String(api.getSettings()?.sbUrl || "ws://127.0.0.1:8080/").trim());
@@ -92,8 +114,11 @@
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
+      api.setValue(root, "overlayObsUrl", s.obsUrl || "");
+      api.setValue(root, "overlayObsPassword", s.obsPassword || "");
       api.setValue(root, "overlaySbUrl", s.sbUrl || "");
-      api.setChecked(root, "overlayEnabled", !!s.overlayEnabled);
+      api.setValue(root, "overlaySbPassword", s.sbPassword || "");
+      api.setValue(root, "overlayActionPrefix", String(s.actionPrefix || "").trim());
       api.setValue(root, "overlayWsPort", Number.isFinite(s.overlayWsPort) ? s.overlayWsPort : 4455);
       const connectionWrap = root.querySelector("#overlayConnectionWrap");
       if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
@@ -102,7 +127,7 @@
         connectionToggle.classList.toggle("active", CONNECTIONS_OPEN);
         connectionToggle.innerHTML = `<span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span>`;
       }
-      api.refreshSbStatus?.();
+      api.refreshConnectionStatuses?.();
     }
   };
 })(window);

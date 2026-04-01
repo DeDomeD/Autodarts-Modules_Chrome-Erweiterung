@@ -4,7 +4,6 @@
     id: "liga",
     autoInstall: true,
     defaults: {
-      ligaEnabled: false,
       ligaName: "",
       ligaSeason: "",
       ligaTeamName: "",
@@ -12,7 +11,6 @@
       ligaMatchesJson: "[]"
     },
     ini: {
-      togglesBool: ["ligaEnabled"],
       modulesConfigString: {
         ligaName: "",
         ligaSeason: "",
