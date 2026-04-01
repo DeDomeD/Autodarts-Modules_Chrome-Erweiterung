@@ -50,6 +50,80 @@
     return filters.find((filter) => normalizeManagedFilterKey(filter?.filterName) === managedKey) || null;
   }
 
+  async function resolveManagedFilterSource(settings, targetSegment) {
+    const sceneName = normalizeText(settings?.obsZoomSceneName);
+    const targetSourceName = normalizeText(settings?.obsZoomTargetSource);
+    const sourceCandidates = Array.from(new Set([sceneName, targetSourceName].filter(Boolean)));
+    for (const candidate of sourceCandidates) {
+      try {
+        const filters = await getManagedFiltersForSource(candidate);
+        const targetFilter = findFilterByManagedKey(filters, targetSegment);
+        if (!targetFilter) continue;
+        return {
+          sourceName: candidate,
+          filters,
+          targetFilter
+        };
+      } catch {}
+    }
+    return null;
+  }
+
+  async function applyManagedFilterByKey(managedKey, payload = {}) {
+    const settings = AD_SB.getSettings?.() || {};
+    const targetSegment = normalizeManagedFilterKey(managedKey);
+    if (!targetSegment) return false;
+
+    const resolved = await resolveManagedFilterSource(settings, targetSegment);
+    if (!resolved?.sourceName || !resolved?.targetFilter) {
+      if (settings?.debugAllLogs) {
+        console.log("[Autodarts Modules] managed zoom skipped", {
+          reason: "filter_not_found",
+          targetSegment
+        });
+      }
+      return false;
+    }
+
+    const previousFilterName = lastAutomaticCheckoutFilterByScene.get(resolved.sourceName) || "";
+    let changed = false;
+    for (const filter of resolved.filters) {
+      const filterName = normalizeText(filter?.filterName);
+      if (!filterName) continue;
+      const shouldEnable = normalizeManagedFilterKey(filterName) === targetSegment;
+      const currentlyEnabled = !!filter?.filterEnabled;
+      if (currentlyEnabled !== shouldEnable || filterName === previousFilterName || shouldEnable) {
+        await setSceneFilterEnabled(resolved.sourceName, filterName, shouldEnable);
+        changed = true;
+      }
+    }
+
+    const verifyResponse = await AD_SB.sendObsRequestAwait?.("GetSourceFilter", {
+      sourceName: resolved.sourceName,
+      filterName: resolved.targetFilter.filterName
+    }, 5000);
+    if (verifyResponse?.responseData?.filterEnabled !== true && !changed) {
+      await setSceneFilterEnabled(resolved.sourceName, resolved.targetFilter.filterName, true);
+    }
+
+    const verifiedTargetResponse = await AD_SB.sendObsRequestAwait?.("GetSourceFilter", {
+      sourceName: resolved.sourceName,
+      filterName: resolved.targetFilter.filterName
+    }, 5000);
+    if (verifiedTargetResponse?.responseData?.filterEnabled !== true) {
+      return false;
+    }
+
+    lastAutomaticCheckoutFilterByScene.set(resolved.sourceName, resolved.targetFilter.filterName);
+    AD_SB.logger?.info?.("obs", "managed zoom applied", {
+      sceneName: resolved.sourceName,
+      filterName: resolved.targetFilter.filterName,
+      targetSegment,
+      payload
+    });
+    return true;
+  }
+
   async function getManagedFiltersForSource(sourceName) {
     const target = normalizeText(sourceName);
     if (!target) return [];
@@ -88,24 +162,8 @@
       return false;
     }
 
-    const sourceCandidates = Array.from(new Set([sceneName, targetSourceName].filter(Boolean)));
-    let activeSourceName = "";
-    let filters = [];
-    let targetFilter = null;
-
-    for (const candidate of sourceCandidates) {
-      try {
-        const candidateFilters = await getManagedFiltersForSource(candidate);
-        const candidateTargetFilter = findFilterByManagedKey(candidateFilters, targetSegment);
-        if (!candidateTargetFilter) continue;
-        activeSourceName = candidate;
-        filters = candidateFilters;
-        targetFilter = candidateTargetFilter;
-        break;
-      } catch {}
-    }
-
-    if (!activeSourceName || !targetFilter) {
+    const resolved = await resolveManagedFilterSource(settings, targetSegment);
+    if (!resolved?.sourceName || !resolved?.targetFilter) {
       if (settings?.debugAllLogs) {
         console.log("[Autodarts Modules] checkout auto zoom skipped", {
           reason: "filter_not_found",
@@ -117,6 +175,9 @@
       }
       return false;
     }
+    const activeSourceName = resolved.sourceName;
+    const filters = resolved.filters;
+    const targetFilter = resolved.targetFilter;
 
     const previousFilterName = lastAutomaticCheckoutFilterByScene.get(activeSourceName) || "";
     let changed = false;
@@ -285,7 +346,7 @@
     if (!isModuleActive()) return { ok: false, reason: "module_disabled" };
 
     const parsed = normalizeManualTestTrigger(rawTrigger);
-    if (parsed.managedKey && parsed.managedKey !== "MAIN") {
+    if (parsed.managedKey) {
       const checkoutKey = parsed.checkoutKey || `checkout_${parsed.managedKey.toLowerCase()}`;
       const manualPayload = {
         ...payload,
@@ -294,7 +355,7 @@
         recommendedSegments: [parsed.managedKey],
         recommendedThrow: parsed.managedKey.toLowerCase()
       };
-      const ok = await applyAutomaticCheckoutFilter(checkoutKey, manualPayload);
+      const ok = await applyManagedFilterByKey(parsed.managedKey, manualPayload);
       return { ok, trigger: checkoutKey, managedKey: parsed.managedKey, mode: "managed_filter" };
     }
 

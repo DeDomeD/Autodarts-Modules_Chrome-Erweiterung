@@ -243,6 +243,24 @@
     `;
   }
 
+  function renderConnectionButton(kind, label) {
+    return `
+      <button
+        type="button"
+        class="connectionStatusBtn"
+        data-connection-kind="${kind}"
+        ${kind === "obs" ? "data-obs-status" : "data-sb-status"}
+        data-connection-retry="${kind}"
+      >
+        <div class="connectionStatusLabel">
+          <span>${label}</span>
+          <span class="connectionStatusText" data-connection-status-text></span>
+          <span class="connectionStatusAttempts" data-connection-attempts></span>
+        </div>
+      </button>
+    `;
+  }
+
   scope.AD_SB_MODULES.effects = {
     id: "effects",
     icon: "E",
@@ -257,25 +275,19 @@
             <div class="sectionTitle" style="margin:0;" data-i18n="section_connections">Verbindungen</div>
             <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="effectsConnectionToggle" aria-label="Effects Verbindungen" title="Effects Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button>
           </div>
-          <div class="connectionStatusGrid">
-            <button type="button" class="connectionStatusBtn" data-obs-status data-connection-retry="obs">
-              <div class="connectionStatusLabel">
-                <span>OBS</span>
-                <span class="connectionStatusText" data-connection-status-text></span>
-                <span class="connectionStatusAttempts" data-connection-attempts></span>
-              </div>
-            </button>
-            <button type="button" class="connectionStatusBtn" data-sb-status data-connection-retry="sb">
-              <div class="connectionStatusLabel">
-                <span>Streamer.bot</span>
-                <span class="connectionStatusText" data-connection-status-text></span>
-                <span class="connectionStatusAttempts" data-connection-attempts></span>
-              </div>
-            </button>
+          <div class="connectionStatusGrid" id="effectsConnectionGrid" data-connections-open="${CONNECTIONS_OPEN ? "true" : "false"}">
+            ${renderConnectionButton("obs", "OBS")}
+            ${renderConnectionButton("sb", "Streamer.bot")}
           </div>
           <div class="inlinePopupWrap${CONNECTIONS_OPEN ? " open" : ""}" id="effectsConnectionWrap" style="padding:0; border-top:none; background:transparent;">
             <div class="formRow">
-              <label class="label" for="obsUrl">OBS WS URL</label>
+              <div class="connectionInputHeader">
+                <label class="label" for="obsUrl">OBS WS URL</label>
+                <div class="connectionInputSwitch">
+                  <span>Aktiv</span>
+                  <label class="switch switchCompact"><input id="effectsObsEnabled" type="checkbox" /><span class="slider"></span></label>
+                </div>
+              </div>
               <input class="input" id="obsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
               <div class="hint" data-i18n="hint_obs_ws">OBS WebSocket Server</div>
             </div>
@@ -285,7 +297,13 @@
             </div>
             <div class="divider"></div>
             <div class="formRow">
-              <label class="label" for="sbUrl">Streamer.bot WS URL</label>
+              <div class="connectionInputHeader">
+                <label class="label" for="sbUrl">Streamer.bot WS URL</label>
+                <div class="connectionInputSwitch">
+                  <span>Aktiv</span>
+                  <label class="switch switchCompact"><input id="effectsSbEnabled" type="checkbox" /><span class="slider"></span></label>
+                </div>
+              </div>
               <input class="input" id="sbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
               <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
             </div>
@@ -486,6 +504,8 @@
         scope.AD_SB_MODULES.effects.sync(api, api.getSettings?.() || {});
       });
 
+      api.bindAuto(root, "effectsObsEnabled", "obsEnabled");
+      api.bindAuto(root, "effectsSbEnabled", "sbEnabled");
       api.bindAutoImmediate(root, "obsUrl", "obsUrl", (value) => String(value || "").trim());
       api.bindAutoImmediate(root, "obsPassword", "obsPassword", (value) => String(value || ""));
       api.bindAutoImmediate(root, "sbUrl", "sbUrl", (value) => String(value || "").trim());
@@ -601,6 +621,8 @@
         "missGuardOnDoubleOut"
       ];
       ids.forEach((id) => api.setChecked(root, id, !!s[id]));
+      api.setChecked(root, "effectsObsEnabled", s.obsEnabled !== false);
+      api.setChecked(root, "effectsSbEnabled", s.sbEnabled !== false);
       api.setValue(root, "sbUrl", s.sbUrl || "");
       api.setValue(root, "sbPassword", s.sbPassword || "");
       api.setValue(root, "obsUrl", s.obsUrl || "");
@@ -609,6 +631,15 @@
       api.setValue(root, "missGuardThreshold", Number.isFinite(s.missGuardThreshold) ? s.missGuardThreshold : 40);
       const connectionWrap = root.querySelector("#effectsConnectionWrap");
       if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
+      const connectionGrid = root.querySelector("#effectsConnectionGrid");
+      if (connectionGrid) {
+        connectionGrid.dataset.connectionsOpen = CONNECTIONS_OPEN ? "true" : "false";
+        const visibleCount = Array.from(connectionGrid.querySelectorAll("[data-connection-kind]")).filter((node) => {
+          const kind = String(node.dataset.connectionKind || "");
+          return kind === "obs" ? s.obsEnabled !== false : s.sbEnabled !== false;
+        }).length;
+        connectionGrid.classList.toggle("compactSingle", visibleCount <= 1);
+      }
       const connectionToggle = root.querySelector("#effectsConnectionToggle");
       if (connectionToggle) {
         connectionToggle.classList.toggle("active", CONNECTIONS_OPEN);

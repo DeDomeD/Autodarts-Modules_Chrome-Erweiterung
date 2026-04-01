@@ -2,6 +2,24 @@
   scope.AD_SB_MODULES = scope.AD_SB_MODULES || {};
   let CONNECTIONS_OPEN = false;
 
+  function renderConnectionButton(kind, label) {
+    return `
+      <button
+        type="button"
+        class="connectionStatusBtn"
+        data-connection-kind="${kind}"
+        ${kind === "obs" ? "data-obs-status" : "data-sb-status"}
+        data-connection-retry="${kind}"
+      >
+        <div class="connectionStatusLabel">
+          <span>${label}</span>
+          <span class="connectionStatusText" data-connection-status-text></span>
+          <span class="connectionStatusAttempts" data-connection-attempts></span>
+        </div>
+      </button>
+    `;
+  }
+
   scope.AD_SB_MODULES.overlay = {
     id: "overlay",
     icon: "O",
@@ -16,25 +34,19 @@
             <div class="sectionTitle" style="margin:0;" data-i18n="section_connections">Verbindungen</div>
             <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="overlayConnectionToggle" aria-label="Overlay Verbindungen" title="Overlay Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button>
           </div>
-          <div class="connectionStatusGrid">
-            <button type="button" class="connectionStatusBtn" data-obs-status data-connection-retry="obs">
-              <div class="connectionStatusLabel">
-                <span>OBS</span>
-                <span class="connectionStatusText" data-connection-status-text></span>
-                <span class="connectionStatusAttempts" data-connection-attempts></span>
-              </div>
-            </button>
-            <button type="button" class="connectionStatusBtn" data-sb-status data-connection-retry="sb">
-              <div class="connectionStatusLabel">
-                <span>Streamer.bot</span>
-                <span class="connectionStatusText" data-connection-status-text></span>
-                <span class="connectionStatusAttempts" data-connection-attempts></span>
-              </div>
-            </button>
+          <div class="connectionStatusGrid" id="overlayConnectionGrid" data-connections-open="${CONNECTIONS_OPEN ? "true" : "false"}">
+            ${renderConnectionButton("obs", "OBS")}
+            ${renderConnectionButton("sb", "Streamer.bot")}
           </div>
           <div class="inlinePopupWrap${CONNECTIONS_OPEN ? " open" : ""}" id="overlayConnectionWrap" style="padding:0; border-top:none; background:transparent;">
             <div class="formRow">
-              <label class="label" for="overlayObsUrl">OBS WS URL</label>
+              <div class="connectionInputHeader">
+                <label class="label" for="overlayObsUrl">OBS WS URL</label>
+                <div class="connectionInputSwitch">
+                  <span>Aktiv</span>
+                  <label class="switch switchCompact"><input id="overlayObsEnabled" type="checkbox" /><span class="slider"></span></label>
+                </div>
+              </div>
               <input class="input" id="overlayObsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
               <div class="hint" data-i18n="hint_obs_ws">OBS WebSocket Server</div>
             </div>
@@ -44,7 +56,13 @@
             </div>
             <div class="divider"></div>
             <div class="formRow">
-              <label class="label" for="overlaySbUrl">Streamer.bot WS URL</label>
+              <div class="connectionInputHeader">
+                <label class="label" for="overlaySbUrl">Streamer.bot WS URL</label>
+                <div class="connectionInputSwitch">
+                  <span>Aktiv</span>
+                  <label class="switch switchCompact"><input id="overlaySbEnabled" type="checkbox" /><span class="slider"></span></label>
+                </div>
+              </div>
               <input class="input" id="overlaySbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
               <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
             </div>
@@ -87,6 +105,8 @@
         CONNECTIONS_OPEN = !CONNECTIONS_OPEN;
         scope.AD_SB_MODULES.overlay.sync(api, api.getSettings?.() || {});
       });
+      api.bindAuto(root, "overlayObsEnabled", "obsEnabled");
+      api.bindAuto(root, "overlaySbEnabled", "sbEnabled");
       api.bindAuto(root, "overlayWsPort", "overlayWsPort", "number");
       api.bindAutoImmediate(root, "overlayObsUrl", "obsUrl", (value) => String(value || "").trim());
       api.bindAutoImmediate(root, "overlayObsPassword", "obsPassword", (value) => String(value || ""));
@@ -114,6 +134,8 @@
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
+      api.setChecked(root, "overlayObsEnabled", s.obsEnabled !== false);
+      api.setChecked(root, "overlaySbEnabled", s.sbEnabled !== false);
       api.setValue(root, "overlayObsUrl", s.obsUrl || "");
       api.setValue(root, "overlayObsPassword", s.obsPassword || "");
       api.setValue(root, "overlaySbUrl", s.sbUrl || "");
@@ -122,6 +144,15 @@
       api.setValue(root, "overlayWsPort", Number.isFinite(s.overlayWsPort) ? s.overlayWsPort : 4455);
       const connectionWrap = root.querySelector("#overlayConnectionWrap");
       if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
+      const connectionGrid = root.querySelector("#overlayConnectionGrid");
+      if (connectionGrid) {
+        connectionGrid.dataset.connectionsOpen = CONNECTIONS_OPEN ? "true" : "false";
+        const visibleCount = Array.from(connectionGrid.querySelectorAll("[data-connection-kind]")).filter((node) => {
+          const kind = String(node.dataset.connectionKind || "");
+          return kind === "obs" ? s.obsEnabled !== false : s.sbEnabled !== false;
+        }).length;
+        connectionGrid.classList.toggle("compactSingle", visibleCount <= 1);
+      }
       const connectionToggle = root.querySelector("#overlayConnectionToggle");
       if (connectionToggle) {
         connectionToggle.classList.toggle("active", CONNECTIONS_OPEN);

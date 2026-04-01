@@ -32,9 +32,27 @@
   }
 
   function renderTestButtons() {
-    return ["T20", "D20", "T19", "D10"].map((trigger) => `
+    return ["T20", "D20", "BULL", "D10", "T19", "MAIN"].map((trigger) => `
       <button class="btnMini" type="button" data-obs-zoom-test-preset="${trigger}">${trigger}</button>
     `).join("");
+  }
+
+  function renderConnectionButton(kind, label) {
+    return `
+      <button
+        type="button"
+        class="connectionStatusBtn"
+        data-connection-kind="${kind}"
+        ${kind === "obs" ? "data-obs-status" : "data-sb-status"}
+        data-connection-retry="${kind}"
+      >
+        <div class="connectionStatusLabel">
+          <span>${label}</span>
+          <span class="connectionStatusText" data-connection-status-text></span>
+          <span class="connectionStatusAttempts" data-connection-attempts></span>
+        </div>
+      </button>
+    `;
   }
 
   async function runObsZoomTriggerTest(api, root, rawTrigger) {
@@ -310,25 +328,19 @@
             <div class="sectionTitle" style="margin:0;" data-i18n="section_connections">Verbindungen</div>
             <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="obsZoomConnectionToggle" aria-label="Zoom Verbindungen" title="Zoom Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button>
           </div>
-          <div class="connectionStatusGrid">
-            <button type="button" class="connectionStatusBtn" data-obs-status data-connection-retry="obs">
-              <div class="connectionStatusLabel">
-                <span>OBS</span>
-                <span class="connectionStatusText" data-connection-status-text></span>
-                <span class="connectionStatusAttempts" data-connection-attempts></span>
-              </div>
-            </button>
-            <button type="button" class="connectionStatusBtn" data-sb-status data-connection-retry="sb">
-              <div class="connectionStatusLabel">
-                <span>Streamer.bot</span>
-                <span class="connectionStatusText" data-connection-status-text></span>
-                <span class="connectionStatusAttempts" data-connection-attempts></span>
-              </div>
-            </button>
+          <div class="connectionStatusGrid" id="obsZoomConnectionGrid" data-connections-open="${CONNECTIONS_OPEN ? "true" : "false"}">
+            ${renderConnectionButton("obs", "OBS")}
+            ${renderConnectionButton("sb", "Streamer.bot")}
           </div>
           <div class="inlinePopupWrap${CONNECTIONS_OPEN ? " open" : ""}" id="obsZoomConnectionWrap" style="padding:0; border-top:none; background:transparent;">
             <div class="formRow">
-              <label class="label" for="obsUrl">OBS WS URL</label>
+              <div class="connectionInputHeader">
+                <label class="label" for="obsUrl">OBS WS URL</label>
+                <div class="connectionInputSwitch">
+                  <span>Aktiv</span>
+                  <label class="switch switchCompact"><input id="obsZoomObsEnabled" type="checkbox" /><span class="slider"></span></label>
+                </div>
+              </div>
               <input class="input" id="obsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
               <div class="hint" data-i18n="hint_obs_ws">OBS WebSocket Server</div>
             </div>
@@ -338,7 +350,13 @@
             </div>
             <div class="divider"></div>
             <div class="formRow">
-              <label class="label" for="obsZoomSbUrl">Streamer.bot WS URL</label>
+              <div class="connectionInputHeader">
+                <label class="label" for="obsZoomSbUrl">Streamer.bot WS URL</label>
+                <div class="connectionInputSwitch">
+                  <span>Aktiv</span>
+                  <label class="switch switchCompact"><input id="obsZoomSbEnabled" type="checkbox" /><span class="slider"></span></label>
+                </div>
+              </div>
               <input class="input" id="obsZoomSbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
               <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
             </div>
@@ -441,16 +459,16 @@
 
         <div class="card">
           <div class="sectionTitle" style="margin:0 0 12px 0;">Test Area</div>
-          <div class="hint" style="margin-bottom:12px;">Teste Zoom-Trigger direkt gegen OBS. Beispiele wie <code>T20</code>, <code>D20</code>, <code>T19</code> oder <code>D10</code> schalten den passenden Move-Filter sofort.</div>
+          <div class="hint" style="margin-bottom:12px;">Teste Zoom-Trigger direkt gegen OBS. Presets wie <code>T20</code>, <code>D20</code>, <code>BULL</code>, <code>D10</code>, <code>T19</code> oder <code>MAIN</code> schalten den passenden Move-Filter sofort.</div>
+          <div class="miniButtonRow" style="margin-bottom:12px;">
+            ${renderTestButtons()}
+          </div>
           <div class="formRow">
             <label class="label" for="obsZoomTestTrigger">Trigger</label>
             <input class="input" id="obsZoomTestTrigger" type="text" placeholder="z. B. T20 oder checkout_t20" value="${OBS_TEST_TRIGGER}" />
           </div>
           <div class="inlineActionsRow" style="margin-top:14px;">
             <button class="btn primary" id="btnObsZoomTestTrigger" type="button">Testen</button>
-          </div>
-          <div class="obsZoomBackupActions" style="margin-top:10px;">
-            ${renderTestButtons()}
           </div>
         </div>
         <div id="obsZoomSourcePickerMount">${renderSourcePicker()}</div>
@@ -464,6 +482,8 @@
         CONNECTIONS_OPEN = !CONNECTIONS_OPEN;
         scope.AD_SB_MODULES.obszoom.sync(api, api.getSettings?.() || {});
       });
+      api.bindAuto(root, "obsZoomObsEnabled", "obsEnabled");
+      api.bindAuto(root, "obsZoomSbEnabled", "sbEnabled");
       api.bindAutoImmediate(root, "obsUrl", "obsUrl", (value) => String(value || "").trim());
       api.bindAutoImmediate(root, "obsZoomObsPassword", "obsPassword", (value) => String(value || ""));
       api.bindAutoImmediate(root, "obsZoomSbUrl", "sbUrl", (value) => String(value || "").trim());
@@ -656,6 +676,8 @@
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
+      api.setChecked(root, "obsZoomObsEnabled", s.obsEnabled !== false);
+      api.setChecked(root, "obsZoomSbEnabled", s.sbEnabled !== false);
       api.setValue(root, "obsUrl", s.obsUrl || "");
       api.setValue(root, "obsZoomObsPassword", s.obsPassword || "");
       api.setValue(root, "obsZoomSbUrl", s.sbUrl || "");
@@ -687,6 +709,15 @@
       api.setValue(root, "obsZoomTestTrigger", OBS_TEST_TRIGGER);
       const connectionWrap = root.querySelector("#obsZoomConnectionWrap");
       if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
+      const connectionGrid = root.querySelector("#obsZoomConnectionGrid");
+      if (connectionGrid) {
+        connectionGrid.dataset.connectionsOpen = CONNECTIONS_OPEN ? "true" : "false";
+        const visibleCount = Array.from(connectionGrid.querySelectorAll("[data-connection-kind]")).filter((node) => {
+          const kind = String(node.dataset.connectionKind || "");
+          return kind === "obs" ? s.obsEnabled !== false : s.sbEnabled !== false;
+        }).length;
+        connectionGrid.classList.toggle("compactSingle", visibleCount <= 1);
+      }
       const connectionToggle = root.querySelector("#obsZoomConnectionToggle");
       if (connectionToggle) {
         connectionToggle.classList.toggle("active", CONNECTIONS_OPEN);

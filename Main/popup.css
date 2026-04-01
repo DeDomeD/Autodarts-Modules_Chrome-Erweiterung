@@ -36,58 +36,16 @@ body{
   flex-direction:column;
 }
 
-.header,
 .main{
   margin-left:58px;
   width:calc(100% - 58px);
 }
 
-.header{
-  padding:12px 12px 8px;
-}
-
-.search{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:10px 10px;
-  border-radius:14px;
-  background:rgba(0,0,0,.28);
-  border:1px solid var(--stroke);
-  backdrop-filter: blur(10px);
-}
-
-.searchIcon{
-  opacity:.75;
-  font-size:14px;
-  width:18px;
-  text-align:center;
-}
-
-.search input{
-  flex:1;
-  border:none;
-  outline:none;
-  background:transparent;
-  color:var(--text);
-  font-size:13px;
-}
-
-.iconBtn{
-  border:none;
-  background:transparent;
-  color:var(--muted);
-  cursor:pointer;
-  padding:4px 6px;
-  border-radius:10px;
-}
-.iconBtn:hover{background:rgba(255,255,255,.06)}
-
 .main{
   flex:1;
   min-height:0;
   overflow:auto;
-  padding:0 12px 18px;
+  padding:12px 12px 18px;
 }
 
 .title{
@@ -1396,6 +1354,9 @@ body{
   grid-template-columns:1fr 1fr;
   gap:10px;
 }
+.connectionStatusGrid.compactSingle{
+  grid-template-columns:1fr;
+}
 .connectionStatusBtn{
   width:100%;
   display:flex;
@@ -1410,6 +1371,9 @@ body{
   cursor:pointer;
   text-align:left;
   transition:filter .16s ease, border-color .16s ease, background .16s ease;
+}
+.connectionStatusBtn.connectionHidden{
+  display:none;
 }
 .connectionStatusBtn.connected{
   color:#d8ffe8;
@@ -1448,6 +1412,29 @@ body{
   font-size:8px;
   color:var(--muted);
   white-space:nowrap;
+}
+.connectionInputHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.connectionInputHeader .label{
+  margin:0;
+}
+.connectionInputSwitch{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--muted);
+  font-size:11px;
+  white-space:nowrap;
+}
+.miniButtonRow{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:wrap;
 }
 
 .nav{

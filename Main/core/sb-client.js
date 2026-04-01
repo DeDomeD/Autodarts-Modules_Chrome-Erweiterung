@@ -82,6 +82,7 @@
   }
 
   function shouldUseStreamerbot(settings = AD_SB.getSettings()) {
+    if (settings?.sbEnabled === false) return false;
     const installed = new Set(normalizeInstalledModules(settings?.installedModules));
     return installed.has("effects") || installed.has("overlay") || installed.has("obszoom");
   }

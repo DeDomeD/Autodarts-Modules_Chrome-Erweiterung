@@ -193,6 +193,14 @@ function clearInvalidLastPageIfNeeded() {}
 
 function applySearchFilter(query) {
   SEARCH = String(query || "").trim().toLowerCase();
+  if (!SEARCH) {
+    const activePage = document.querySelector(".page.active");
+    if (!activePage) return;
+    $$(".listItem, .listToggle, .tile, .card", activePage).forEach((el) => {
+      el.style.display = "";
+    });
+    return;
+  }
   const activePage = document.querySelector(".page.active");
   if (!activePage) return;
   const rows = $$(".listItem, .listToggle, .tile, .card", activePage);
@@ -260,23 +268,42 @@ function getConnectionStatusText(status) {
   return "";
 }
 
+function isConnectionEnabled(kind, settings = SETTINGS) {
+  if (kind === "sb") return settings?.sbEnabled !== false;
+  if (kind === "obs") return settings?.obsEnabled !== false;
+  return true;
+}
+
 function applyConnectionStatusField(field, status) {
   if (!field) return;
+  const kind = String(field.dataset.connectionKind || "").trim().toLowerCase();
+  const expanded = field.closest("[data-connections-open]")?.dataset?.connectionsOpen === "true";
+  const enabled = isConnectionEnabled(kind);
+  field.classList.toggle("connectionHidden", !enabled && !expanded);
+  if (!enabled) {
+    field.classList.remove("connected", "connecting", "exhausted");
+    field.classList.add("disconnected");
+  }
   const state = String(status?.state || "unknown").toLowerCase();
   const exhausted = !!status?.exhausted;
   field.classList.remove("connected", "disconnected", "connecting", "exhausted");
-  if (state === "connected") field.classList.add("connected");
-  else if (state === "connecting") field.classList.add("connecting");
-  else if (state === "disconnected") field.classList.add("disconnected");
-  if (exhausted) field.classList.add("exhausted");
+  if (!enabled) {
+    field.classList.add("disconnected");
+  } else {
+    if (state === "connected") field.classList.add("connected");
+    else if (state === "connecting") field.classList.add("connecting");
+    else if (state === "disconnected") field.classList.add("disconnected");
+    if (exhausted) field.classList.add("exhausted");
+  }
 
   const textEl = field.querySelector("[data-connection-status-text]");
   const attemptsEl = field.querySelector("[data-connection-attempts]");
-  if (textEl) textEl.textContent = getConnectionStatusText(status);
+  if (textEl) textEl.textContent = enabled ? getConnectionStatusText(status) : "aus";
   if (attemptsEl) {
     const attempts = Number(status?.attempts || 0);
     const state = String(status?.state || "unknown").toLowerCase();
-    if (attempts > 0) attemptsEl.textContent = `${attempts}/5`;
+    if (!enabled) attemptsEl.textContent = "";
+    else if (attempts > 0) attemptsEl.textContent = `${attempts}/5`;
     else if (state === "connected") attemptsEl.textContent = "";
     else attemptsEl.textContent = "";
   }
@@ -340,8 +367,16 @@ function parseIniSettings(text) {
 
   if (sb.sbUrl) partial.sbUrl = sb.sbUrl;
   if (sb.sbPassword !== undefined) partial.sbPassword = sb.sbPassword;
+  if (sb.sbEnabled !== undefined) {
+    const parsed = parseIniBoolean(sb.sbEnabled);
+    if (parsed !== null) partial.sbEnabled = parsed;
+  }
   if (sb.obsUrl) partial.obsUrl = sb.obsUrl;
   if (sb.obsPassword !== undefined) partial.obsPassword = sb.obsPassword;
+  if (sb.obsEnabled !== undefined) {
+    const parsed = parseIniBoolean(sb.obsEnabled);
+    if (parsed !== null) partial.obsEnabled = parsed;
+  }
   if (sb.actionPrefix !== undefined) partial.actionPrefix = normalizePrefix(sb.actionPrefix);
   if (toggles.uiLanguage !== undefined) partial.uiLanguage = String(toggles.uiLanguage).toLowerCase() === "en" ? "en" : "de";
 
@@ -401,8 +436,10 @@ function toIniText(s) {
     `installed=${installedModules.join(",")}`,
     "",
     "[streamerbot]",
+    `sbEnabled=${asBool(settings.sbEnabled !== false)}`,
     `sbUrl=${settings.sbUrl || "ws://127.0.0.1:8080/"}`,
     `sbPassword=${settings.sbPassword || ""}`,
+    `obsEnabled=${asBool(settings.obsEnabled !== false)}`,
     `obsUrl=${settings.obsUrl || "ws://127.0.0.1:4455/"}`,
     `obsPassword=${settings.obsPassword || ""}`,
     `actionPrefix=${(settings.actionPrefix || "AD-SB ").trim()}`,
@@ -771,11 +808,7 @@ async function savePartial(partial) {
 }
 
 function bindShell() {
-  $("searchInput")?.addEventListener("input", (ev) => applySearchFilter(ev.target.value));
-  $("clearSearch")?.addEventListener("click", () => {
-    if ($("searchInput")) $("searchInput").value = "";
-    applySearchFilter("");
-  });
+  applySearchFilter("");
 }
 
 async function init() {

@@ -19,8 +19,10 @@
   }
 
   AD_SB.DEFAULTS = {
+    sbEnabled: true,
     sbUrl: "ws://127.0.0.1:8080/",
     sbPassword: "",
+    obsEnabled: true,
     obsUrl: "ws://127.0.0.1:4455/",
     obsPassword: "",
     websiteApiUrl: DEFAULT_WEBSITE_API_URL,

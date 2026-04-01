@@ -110,6 +110,7 @@
   }
 
   function shouldUseObsConnection(settings = AD_SB.getSettings()) {
+    if (settings?.obsEnabled === false) return false;
     const installed = new Set((Array.isArray(settings?.installedModules) ? settings.installedModules : [])
       .map((item) => String(item || "").trim().toLowerCase())
       .filter(Boolean));
