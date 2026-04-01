@@ -9,16 +9,29 @@
       obsZoomDurationMs: 450,
       obsZoomStrength: 150,
       obsZoomEffectsJson: "[]",
-      checkoutTriggerThreshold: 170
+      checkoutTriggerThreshold: 170,
+      obsZoomMoveEasingType: 3,
+      obsZoomMoveEasingFunction: 2,
+      obsZoomIncludeSingles: true,
+      obsZoomIncludeDoubles: true,
+      obsZoomIncludeTriples: true,
+      obsZoomLastTestTrigger: "T20"
     },
     actionDefaults: {
       checkout: "Checkout"
     },
     ini: {
+      togglesBool: [
+        "obsZoomIncludeSingles",
+        "obsZoomIncludeDoubles",
+        "obsZoomIncludeTriples"
+      ],
       togglesNumber: {
         obsZoomDurationMs: 450,
         obsZoomStrength: 150,
-        checkoutTriggerThreshold: 170
+        checkoutTriggerThreshold: 170,
+        obsZoomMoveEasingType: 3,
+        obsZoomMoveEasingFunction: 2
       },
       modulesConfigString: {
         obsZoomSource: "Game Capture",

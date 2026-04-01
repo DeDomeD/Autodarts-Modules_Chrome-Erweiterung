@@ -24,6 +24,7 @@ importScripts(
   extUrl("Modules/websitedesign/config.js"),
   extUrl("Modules/community/config.js"),
   extUrl("Modules/liga/config.js"),
+  extUrl("Modules/games/config.js"),
   extUrl("Main/settings/defaults.js"),
   extUrl("Main/settings/store.js"),
   extUrl("Main/core/logger.js"),

@@ -9,7 +9,11 @@ let CONNECTION_STATUS_TIMER = null;
 const DEFAULT_WEBSITE_API_URL = "https://autodarts-modules-production.up.railway.app";
 const WEBSITE_URL = `${DEFAULT_WEBSITE_API_URL}/`;
 
-const MODULE_ORDER = ["effects", "overlay", "wled", "caller", "obszoom", "macros", "websitedesign", "community", "liga"];
+const MODULE_ORDER = ["effects", "overlay", "wled", "caller", "obszoom", "macros", "websitedesign", "community", "liga", "games"];
+/** Module, die in der Sidebar mit einem gruenen Rand-Pip als „fertig“ markiert werden (data-i18n-title Key). */
+const MODULE_NAV_READY = {
+  obszoom: "nav_module_ready_obszoom"
+};
 const WEBSITE_ICON_COLOR = "assets/ICON.png";
 const WEBSITE_ICON_GRAY = "assets/ICON_grau.png";
 const LAST_PAGE_STORAGE_KEY = "ad_sb_last_popup_page";
@@ -99,7 +103,7 @@ function collectModuleIniSpec() {
 }
 
 function clearOverflowMarquee() {
-  const nodes = $$(".liTitle, .liSub, .cardTitle, .sectionTitle");
+  const nodes = $$(".liTitle");
   nodes.forEach((el) => {
     if (el.dataset.plainText) el.textContent = el.dataset.plainText;
     el.classList.remove("marqueeOn");
@@ -107,8 +111,11 @@ function clearOverflowMarquee() {
   });
 }
 
+/** Nur .liTitle: einzeilige Zeilen in ListToggle — Untertitel (.liSub) und Überschriften sollen umbrechen, nicht laufen. */
 function applyOverflowMarquee() {
-  const nodes = $$(".liTitle, .liSub, .cardTitle, .sectionTitle");
+  const nodes = $$(".liTitle");
+  /* Mindestüberstand in px: verhindert Lauftext wegen Subpixel/Roundoff obwohl optisch alles passt. */
+  const OVERFLOW_PAD = 8;
   nodes.forEach((el) => {
     if (el.querySelector(":scope > .marqueeTrack")) el.textContent = el.dataset.plainText || "";
     const plain = (el.textContent || "").trim();
@@ -116,7 +123,7 @@ function applyOverflowMarquee() {
     el.classList.remove("marqueeOn");
     el.style.removeProperty("--marquee-duration");
 
-    if (!plain || !el.offsetParent || el.scrollWidth <= el.clientWidth + 2) return;
+    if (!plain || !el.offsetParent || el.scrollWidth <= el.clientWidth + OVERFLOW_PAD) return;
 
     const track = document.createElement("span");
     track.className = "marqueeTrack";
@@ -160,7 +167,7 @@ function applyI18n() {
     el.setAttribute("aria-label", t(key));
   });
 
-  requestAnimationFrame(applyOverflowMarquee);
+  requestAnimationFrame(() => requestAnimationFrame(applyOverflowMarquee));
 }
 
 function setPage(name) {
@@ -655,7 +662,8 @@ function navIconSvg(id, fallback = "*") {
     obszoom: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4M11 8v6M8 11h6"/></svg>`,
     websitedesign: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 16 8-8 4 4-8 8H4v-4Z"/><path d="m14 6 2-2 4 4-2 2"/></svg>`,
     community: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="8" r="2.5"/><path d="M3.5 18a4.5 4.5 0 0 1 9 0"/><path d="M13 18a3.5 3.5 0 0 1 7 0"/></svg>`,
-    liga: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 5h10v4a5 5 0 0 1-10 0V5Z"/><path d="M9 19h6M12 14v5"/><path d="M5 5h2M17 5h2"/></svg>`
+    liga: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 5h10v4a5 5 0 0 1-10 0V5Z"/><path d="M9 19h6M12 14v5"/><path d="M5 5h2M17 5h2"/></svg>`,
+    games: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path fill="currentColor" d="M8 5h8a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V9a4 4 0 0 1 4-4Zm1.5 7.5a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5Zm5 0a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5Zm-2.5 3a1.25 1.25 0 1 0 0 2.5 1.25 1.25 0 0 0 0-2.5Z"/></svg>`
   };
   return map[id] || `<span>${fallback}</span>`;
 }
@@ -757,6 +765,11 @@ function buildModuleLayout(settings, preferredPage = "") {
       () => setPage(module.id)
     );
     btn.classList.toggle("disabled", !installedSet.has(module.id));
+    const readyKey = MODULE_NAV_READY[module.id];
+    if (readyKey) {
+      btn.classList.add("navItemReady");
+      btn.dataset.i18nTitle = readyKey;
+    }
     if (module.id === "community") navBottom.appendChild(btn);
     else navMiddle.appendChild(btn);
 

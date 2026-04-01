@@ -18,15 +18,57 @@
   let OBS_INCLUDE_TRIPLES = true;
   let OBS_TEST_TRIGGER = "T20";
   const OBS_MOVE_PLUGIN_DOWNLOAD_URL = "https://obsproject.com/forum/resources/move.913/";
+  const DEFAULT_WEBSITE_BASE = "https://autodarts-modules-production.up.railway.app";
 
   function normalizeText(value) {
     return String(value || "").trim();
   }
 
+  function getObsZoomGuidePageUrl(api) {
+    try {
+      const base = api.normalizeWebsiteApiUrl?.(api.getSettings?.()?.websiteApiUrl) || DEFAULT_WEBSITE_BASE;
+      return `${String(base).replace(/\/+$/, "")}/modules/obszoom.html#anleitung`;
+    } catch {
+      return `${DEFAULT_WEBSITE_BASE}/modules/obszoom.html#anleitung`;
+    }
+  }
+
   function renderTestButtons() {
-    return ["T20", "D20", "BULL", "D10", "T19", "MAIN"].map((trigger) => `
-      <button class="btnMini" type="button" data-obs-zoom-test-preset="${trigger}">${trigger}</button>
+    const presets = [
+      { value: "T20", label: "T20" },
+      { value: "BULL", label: "BULL" },
+      { value: "D10", label: "D10" },
+      { value: "T19", label: "T19" },
+      { value: "MAIN", label: "Main" }
+    ];
+    return presets.map((p) => `
+      <button class="btnMini" type="button" data-obs-zoom-test-preset="${p.value}">${p.label}</button>
     `).join("");
+  }
+
+  async function flushObsZoomToStorage(api, root) {
+    const sceneName = normalizeText(root.querySelector("#obsZoomSceneSelect")?.value);
+    const durationEl = root.querySelector("#obsZoomMoveDuration");
+    const duration = Math.max(0, Number(durationEl?.value));
+    const partial = {
+      obsZoomSceneName: sceneName,
+      obsZoomDurationMs: Number.isFinite(duration) ? duration : OBS_MOVE_DURATION,
+      obsZoomMoveEasingType: Number(root.querySelector("#obsZoomEasingType")?.value ?? OBS_EASING_TYPE) || 3,
+      obsZoomMoveEasingFunction: Number(root.querySelector("#obsZoomEasingFunction")?.value ?? OBS_EASING_FUNCTION) || 2,
+      obsZoomIncludeSingles: !!root.querySelector("#obsZoomIncludeSingles")?.checked,
+      obsZoomIncludeDoubles: !!root.querySelector("#obsZoomIncludeDoubles")?.checked,
+      obsZoomIncludeTriples: !!root.querySelector("#obsZoomIncludeTriples")?.checked,
+      obsZoomLastTestTrigger: normalizeText(root.querySelector("#obsZoomTestTrigger")?.value || OBS_TEST_TRIGGER).toUpperCase() || "T20"
+    };
+    const stored = api.getSettings?.() || {};
+    const targetFromUi = normalizeText(OBS_SELECTED_SOURCE);
+    const targetStored = normalizeText(stored.obsZoomTargetSource);
+    if (targetFromUi && (!OBS_SCENE_SOURCES.length || OBS_SCENE_SOURCES.includes(targetFromUi))) {
+      partial.obsZoomTargetSource = targetFromUi;
+    } else if (targetStored) {
+      partial.obsZoomTargetSource = targetStored;
+    }
+    await api.savePartial?.(partial);
   }
 
   function renderConnectionButton(kind, label) {
@@ -47,15 +89,18 @@
     `;
   }
 
-  async function runObsZoomTriggerTest(api, root, rawTrigger) {
+  async function runObsZoomTriggerTest(api, root, rawTrigger, touchInput = true) {
+    await flushObsZoomToStorage(api, root);
     const trigger = normalizeText(rawTrigger).toUpperCase();
     if (!trigger) {
       api.setStatus?.("Bitte einen Zoom-Trigger eingeben.");
       return;
     }
     const input = root.querySelector("#obsZoomTestTrigger");
-    if (input) input.value = trigger;
-    OBS_TEST_TRIGGER = trigger;
+    if (touchInput) {
+      if (input) input.value = trigger;
+      OBS_TEST_TRIGGER = trigger;
+    }
     try {
       const res = await api.send({
         type: "OBS_ZOOM_TRIGGER_TEST",
@@ -190,6 +235,11 @@
       if (OBS_SCENE_SOURCES.includes(storedSource)) OBS_SELECTED_SOURCE = storedSource;
       if (!OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) OBS_SELECTED_SOURCE = OBS_SCENE_SOURCES[0] || "";
       SOURCE_PICKER_OPEN = OBS_SCENE_SOURCES.length > 1;
+      const persist = { obsZoomSceneName: targetScene };
+      if (OBS_SELECTED_SOURCE && OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) {
+        persist.obsZoomTargetSource = OBS_SELECTED_SOURCE;
+      }
+      await api.savePartial?.(persist);
       scope.AD_SB_MODULES.obszoom.sync(api, api.getSettings?.() || {});
       if (!silent) {
         api.setStatus?.(OBS_SCENE_SOURCES.length ? `Quellen geladen: ${OBS_SCENE_SOURCES.length}` : "Keine Quellen in der Szene gefunden.");
@@ -438,19 +488,8 @@
         </div>
 
         <div class="card">
-          <div class="sectionTitle" style="margin:0 0 12px 0;">Backup</div>
-          <div class="hint" style="margin-bottom:12px;">Exportiere oder spiele komplette Szenen-, Quellen- und Filter-Backups wieder ein.</div>
-          <div class="obsZoomBackupActions">
-            <button class="btnMini" id="btnExportObsMoveFilterBackup" type="button">Exportieren</button>
-            <button class="btnMini" id="btnImportObsMoveFilterBackup" type="button">Importieren</button>
-            <button class="btnMini" id="btnDownloadObsMovePlugin" type="button">Plugin</button>
-          </div>
-          <input id="obsZoomBackupImportInput" type="file" accept="application/json,.json" style="display:none;" />
-        </div>
-
-        <div class="card">
           <div class="sectionTitle" style="margin:0 0 12px 0;">Test Area</div>
-          <div class="hint" style="margin-bottom:12px;">Teste Zoom-Trigger direkt gegen OBS. Presets wie <code>T20</code>, <code>D20</code>, <code>BULL</code>, <code>D10</code>, <code>T19</code> oder <code>MAIN</code> schalten den passenden Move-Filter sofort.</div>
+          <div class="hint" style="margin-bottom:12px;">Presets (<code>T20</code>, <code>BULL</code>, <code>D10</code>, <code>T19</code>, Main) feuern sofort &mdash; ohne das Feld unten zu aendern. Das Feld <strong>Trigger</strong> ist nur fuer eigene Befehle; mit <strong>Testen</strong> ausfuehren.</div>
           <div class="miniButtonRow" style="margin-bottom:12px;">
             ${renderTestButtons()}
           </div>
@@ -461,6 +500,20 @@
           <div class="inlineActionsRow" style="margin-top:14px;">
             <button class="btn primary" id="btnObsZoomTestTrigger" type="button">Testen</button>
           </div>
+        </div>
+
+        <div class="card">
+          <div class="sectionTitle" style="margin:0 0 12px 0;">Backup</div>
+          <div class="hint" style="margin-bottom:12px;">Exportiere oder spiele komplette Szenen-, Quellen- und Filter-Backups wieder ein.</div>
+          <div class="obsZoomBackupActions">
+            <button class="btnMini" id="btnExportObsMoveFilterBackup" type="button">Exportieren</button>
+            <button class="btnMini" id="btnImportObsMoveFilterBackup" type="button">Importieren</button>
+          </div>
+          <div class="obsZoomBackupFooter">
+            <button class="btnMini" id="btnObsZoomOpenGuide" type="button">Anleitung (Web)</button>
+            <button class="btnMini" id="btnDownloadObsMovePlugin" type="button">Plugin</button>
+          </div>
+          <input id="obsZoomBackupImportInput" type="file" accept="application/json,.json" style="display:none;" />
         </div>
         <div id="obsZoomSourcePickerMount">${renderSourcePicker()}</div>
         <div id="obsZoomWarningModalMount">${renderWarningModal()}</div>
@@ -489,20 +542,30 @@
       root.querySelector("#obsZoomMoveDuration")?.addEventListener("input", (ev) => {
         OBS_MOVE_DURATION = Math.max(0, Number(ev.target?.value || OBS_MOVE_DURATION) || 0);
       });
+      root.querySelector("#obsZoomMoveDuration")?.addEventListener("change", () => {
+        const v = Math.max(0, Number(root.querySelector("#obsZoomMoveDuration")?.value) || 0);
+        OBS_MOVE_DURATION = v;
+        void api.savePartial?.({ obsZoomDurationMs: v });
+      });
       root.querySelector("#obsZoomIncludeSingles")?.addEventListener("change", (ev) => {
         OBS_INCLUDE_SINGLES = !!ev.target?.checked;
+        void api.savePartial?.({ obsZoomIncludeSingles: OBS_INCLUDE_SINGLES });
       });
       root.querySelector("#obsZoomIncludeDoubles")?.addEventListener("change", (ev) => {
         OBS_INCLUDE_DOUBLES = !!ev.target?.checked;
+        void api.savePartial?.({ obsZoomIncludeDoubles: OBS_INCLUDE_DOUBLES });
       });
       root.querySelector("#obsZoomIncludeTriples")?.addEventListener("change", (ev) => {
         OBS_INCLUDE_TRIPLES = !!ev.target?.checked;
+        void api.savePartial?.({ obsZoomIncludeTriples: OBS_INCLUDE_TRIPLES });
       });
       root.querySelector("#obsZoomEasingType")?.addEventListener("change", (ev) => {
         OBS_EASING_TYPE = Number(ev.target?.value || OBS_EASING_TYPE) || 3;
+        void api.savePartial?.({ obsZoomMoveEasingType: OBS_EASING_TYPE });
       });
       root.querySelector("#obsZoomEasingFunction")?.addEventListener("change", (ev) => {
         OBS_EASING_FUNCTION = Number(ev.target?.value || OBS_EASING_FUNCTION) || 2;
+        void api.savePartial?.({ obsZoomMoveEasingFunction: OBS_EASING_FUNCTION });
       });
       root.querySelectorAll("[data-connection-retry]").forEach((button) => {
         button.addEventListener("click", async () => {
@@ -602,6 +665,18 @@
           "Einspielen"
         );
       });
+      root.querySelector("#btnObsZoomOpenGuide")?.addEventListener("click", () => {
+        const url = getObsZoomGuidePageUrl(api);
+        try {
+          if (chrome?.tabs?.create) {
+            chrome.tabs.create({ url });
+            return;
+          }
+          window.open(url, "_blank", "noopener,noreferrer");
+        } catch (error) {
+          api.setStatus?.(`Anleitung konnte nicht geoeffnet werden: ${String(error?.message || error || "unknown_error")}`);
+        }
+      });
       root.querySelector("#btnDownloadObsMovePlugin")?.addEventListener("click", () => {
         try {
           window.open(OBS_MOVE_PLUGIN_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
@@ -610,8 +685,15 @@
           api.setStatus?.(`Move Plugin Download konnte nicht geoeffnet werden: ${String(error?.message || error || "unknown_error")}`);
         }
       });
+      let obsZoomTestTriggerSaveTimer = null;
       root.querySelector("#obsZoomTestTrigger")?.addEventListener("input", (ev) => {
         OBS_TEST_TRIGGER = normalizeText(ev.target?.value).toUpperCase();
+        if (obsZoomTestTriggerSaveTimer) clearTimeout(obsZoomTestTriggerSaveTimer);
+        obsZoomTestTriggerSaveTimer = setTimeout(() => {
+          obsZoomTestTriggerSaveTimer = null;
+          const v = normalizeText(root.querySelector("#obsZoomTestTrigger")?.value).toUpperCase() || "T20";
+          void api.savePartial?.({ obsZoomLastTestTrigger: v });
+        }, 400);
       });
       root.querySelector("#btnObsZoomTestTrigger")?.addEventListener("click", async () => {
         await runObsZoomTriggerTest(api, root, root.querySelector("#obsZoomTestTrigger")?.value || OBS_TEST_TRIGGER);
@@ -619,7 +701,8 @@
       root.addEventListener("click", async (ev) => {
         const testPresetBtn = ev.target?.closest?.("[data-obs-zoom-test-preset]");
         if (testPresetBtn) {
-          await runObsZoomTriggerTest(api, root, String(testPresetBtn.dataset.obsZoomTestPreset || ""));
+          const preset = String(testPresetBtn.getAttribute("data-obs-zoom-test-preset") || "").trim();
+          await runObsZoomTriggerTest(api, root, preset, false);
           return;
         }
 
@@ -662,11 +745,28 @@
           }
         }
       });
-      void reloadObsScenes(api, root, true);
+      void (async () => {
+        await reloadObsScenes(api, root, true);
+        const sel = normalizeText(root.querySelector("#obsZoomSceneSelect")?.value);
+        if (sel) await reloadObsSceneSources(api, root, sel, true);
+      })();
     },
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
+      {
+        const d = Number(s.obsZoomDurationMs);
+        OBS_MOVE_DURATION = Number.isFinite(d) && d >= 0 ? d : 450;
+        const et = Number(s.obsZoomMoveEasingType);
+        OBS_EASING_TYPE = Number.isFinite(et) ? et : 3;
+        const ef = Number(s.obsZoomMoveEasingFunction);
+        OBS_EASING_FUNCTION = Number.isFinite(ef) ? ef : 2;
+        OBS_INCLUDE_SINGLES = s.obsZoomIncludeSingles !== false;
+        OBS_INCLUDE_DOUBLES = s.obsZoomIncludeDoubles !== false;
+        OBS_INCLUDE_TRIPLES = s.obsZoomIncludeTriples !== false;
+        const tt = normalizeText(s.obsZoomLastTestTrigger || "T20").toUpperCase();
+        OBS_TEST_TRIGGER = tt || "T20";
+      }
       api.setChecked(root, "obsZoomObsEnabled", s.obsEnabled !== false);
       api.setChecked(root, "obsZoomSbEnabled", s.sbEnabled !== false);
       api.setValue(root, "obsUrl", s.obsUrl || "");
@@ -676,10 +776,17 @@
       api.setValue(root, "obsZoomActionPrefix", String(s.actionPrefix || "").trim());
       const sceneSelect = root.querySelector("#obsZoomSceneSelect");
       if (sceneSelect) {
-        const prev = normalizeText(sceneSelect.value || s.obsZoomSceneName);
+        const storedScene = normalizeText(s.obsZoomSceneName);
+        const prevUi = normalizeText(sceneSelect.value);
         sceneSelect.innerHTML = renderSceneOptions();
-        if (prev && OBS_SCENES.includes(prev)) sceneSelect.value = prev;
-        else if (!prev && OBS_SCENES.length) sceneSelect.value = OBS_SCENES[0];
+        let pick = "";
+        if (storedScene && OBS_SCENES.includes(storedScene)) pick = storedScene;
+        else if (prevUi && OBS_SCENES.includes(prevUi)) pick = prevUi;
+        else if (OBS_SCENES.length) pick = OBS_SCENES[0];
+        if (pick) sceneSelect.value = pick;
+        if (pick && pick !== storedScene) {
+          void api.savePartial?.({ obsZoomSceneName: pick });
+        }
       }
       const sourcePickerMount = root.querySelector("#obsZoomSourcePickerMount");
       if (sourcePickerMount) sourcePickerMount.innerHTML = renderSourcePicker();
