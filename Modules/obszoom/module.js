@@ -23,14 +23,6 @@
     return String(value || "").trim();
   }
 
-  function renderTriggerSuggestions() {
-    return `
-      <div class="hint" style="margin-top:12px;">
-        Verfuegbare Checkout-Trigger: <code>checkout</code> fuer jeden Autodarts-Vorschlag im Checkout-Bereich sowie z. B. <code>checkout_t20</code>, <code>checkout_d16</code> oder <code>checkout_bull</code> fuer den ersten empfohlenen Wurf.
-      </div>
-    `;
-  }
-
   function renderTestButtons() {
     return ["T20", "D20", "BULL", "D10", "T19", "MAIN"].map((trigger) => `
       <button class="btnMini" type="button" data-obs-zoom-test-preset="${trigger}">${trigger}</button>
@@ -375,7 +367,6 @@
         <div class="card">
           <div class="sectionTitle" style="margin:0 0 12px 0;">OBS Szenen</div>
           <div class="hint" style="margin-bottom:12px;">Hier werden alle Filter automatisch erstellt, eine manuelle Ausrichtung in OBS wird jedoch weiterhin benoetigt.</div>
-          <div id="obsZoomTriggerSuggestions">${renderTriggerSuggestions()}</div>
           <div class="formRow">
             <label class="label" for="obsZoomCheckoutTriggerThreshold">Checkout Schwelle</label>
             <input class="input" id="obsZoomCheckoutTriggerThreshold" type="number" min="2" max="170" step="1" value="170" />
@@ -683,8 +674,6 @@
       api.setValue(root, "obsZoomSbUrl", s.sbUrl || "");
       api.setValue(root, "obsZoomSbPassword", s.sbPassword || "");
       api.setValue(root, "obsZoomActionPrefix", String(s.actionPrefix || "").trim());
-      const suggestions = root.querySelector("#obsZoomTriggerSuggestions");
-      if (suggestions) suggestions.innerHTML = renderTriggerSuggestions(s);
       const sceneSelect = root.querySelector("#obsZoomSceneSelect");
       if (sceneSelect) {
         const prev = normalizeText(sceneSelect.value || s.obsZoomSceneName);
