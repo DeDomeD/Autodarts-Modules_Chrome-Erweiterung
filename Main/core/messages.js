@@ -518,12 +518,9 @@
               );
             }
 
-            if (e.type === "throw") AD_SB.effects.handleThrow(e);
-            else if (e.type === "state") {
-              AD_SB.autodartsTriggers?.handleState?.(e);
-              AD_SB.effects.handleState(e);
-            }
-            else if (e.type === "event") AD_SB.effects.handleGameEvent(e);
+            if (e.type === "throw") AD_SB.autodartsTriggers?.handleThrow?.(e);
+            else if (e.type === "state") AD_SB.autodartsTriggers?.handleState?.(e);
+            else if (e.type === "event") AD_SB.autodartsTriggers?.handleGameEvent?.(e);
 
             sendResponse({ ok: true });
             return;
@@ -541,7 +538,7 @@
                 console.log(`ui event kind="${kind}"`);
               }
             }
-            AD_SB.effects.handleUiEvent(msg.payload);
+            AD_SB.autodartsTriggers?.handleUiEvent?.(msg.payload);
             sendResponse({ ok: true });
             return;
           }

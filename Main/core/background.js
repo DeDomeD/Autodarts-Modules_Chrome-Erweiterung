@@ -10,6 +10,10 @@ self.AD_SB = self.AD_SB || {};
 
 const extUrl = (path) => chrome.runtime.getURL(path);
 
+if (chrome?.sidePanel?.setPanelBehavior) {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+}
+
 importScripts(
   extUrl("Modules/effects/config.js"),
   extUrl("Modules/overlay/config.js"),
@@ -24,7 +28,7 @@ importScripts(
   extUrl("Main/settings/store.js"),
   extUrl("Main/core/logger.js"),
   extUrl("Main/core/data-capture.js"),
-  extUrl("Main/core/autodarts-triggers.js"),
+  extUrl("Main/bridge/autodarts-triggers.js"),
   extUrl("Modules/wled/engine.js"),
   extUrl("Main/core/sb-client.js"),
   extUrl("Main/core/obs-client.js"),
