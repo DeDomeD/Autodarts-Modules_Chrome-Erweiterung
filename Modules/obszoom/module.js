@@ -16,6 +16,7 @@
   let OBS_INCLUDE_SINGLES = true;
   let OBS_INCLUDE_DOUBLES = true;
   let OBS_INCLUDE_TRIPLES = true;
+  let OBS_TEST_TRIGGER = "T20";
   const OBS_MOVE_PLUGIN_DOWNLOAD_URL = "https://obsproject.com/forum/resources/move.913/";
 
   function normalizeText(value) {
@@ -28,6 +29,38 @@
         Verfuegbare Checkout-Trigger: <code>checkout</code> fuer jeden Autodarts-Vorschlag im Checkout-Bereich sowie z. B. <code>checkout_t20</code>, <code>checkout_d16</code> oder <code>checkout_bull</code> fuer den ersten empfohlenen Wurf.
       </div>
     `;
+  }
+
+  function renderTestButtons() {
+    return ["T20", "D20", "T19", "D10"].map((trigger) => `
+      <button class="btnMini" type="button" data-obs-zoom-test-preset="${trigger}">${trigger}</button>
+    `).join("");
+  }
+
+  async function runObsZoomTriggerTest(api, root, rawTrigger) {
+    const trigger = normalizeText(rawTrigger).toUpperCase();
+    if (!trigger) {
+      api.setStatus?.("Bitte einen Zoom-Trigger eingeben.");
+      return;
+    }
+    const input = root.querySelector("#obsZoomTestTrigger");
+    if (input) input.value = trigger;
+    OBS_TEST_TRIGGER = trigger;
+    try {
+      const res = await api.send({
+        type: "OBS_ZOOM_TRIGGER_TEST",
+        trigger,
+        payload: {
+          source: "obszoom_module_test"
+        }
+      });
+      if (!res?.ok) throw new Error(String(res?.error || res?.reason || "obs_zoom_trigger_test_failed"));
+      const modeLabel = res?.mode === "managed_filter" ? "Filter" : "Trigger";
+      const targetLabel = String(res?.managedKey || res?.trigger || trigger);
+      api.setStatus?.(`Zoom-Test gesendet: ${modeLabel} ${targetLabel}`);
+    } catch (error) {
+      api.setStatus?.(`Zoom-Test fehlgeschlagen: ${String(error?.message || error || "unknown_error")}`);
+    }
   }
 
   function renderSceneOptions() {
@@ -405,6 +438,21 @@
           </div>
           <input id="obsZoomBackupImportInput" type="file" accept="application/json,.json" style="display:none;" />
         </div>
+
+        <div class="card">
+          <div class="sectionTitle" style="margin:0 0 12px 0;">Test Area</div>
+          <div class="hint" style="margin-bottom:12px;">Teste Zoom-Trigger direkt gegen OBS. Beispiele wie <code>T20</code>, <code>D20</code>, <code>T19</code> oder <code>D10</code> schalten den passenden Move-Filter sofort.</div>
+          <div class="formRow">
+            <label class="label" for="obsZoomTestTrigger">Trigger</label>
+            <input class="input" id="obsZoomTestTrigger" type="text" placeholder="z. B. T20 oder checkout_t20" value="${OBS_TEST_TRIGGER}" />
+          </div>
+          <div class="inlineActionsRow" style="margin-top:14px;">
+            <button class="btn primary" id="btnObsZoomTestTrigger" type="button">Testen</button>
+          </div>
+          <div class="obsZoomBackupActions" style="margin-top:10px;">
+            ${renderTestButtons()}
+          </div>
+        </div>
         <div id="obsZoomSourcePickerMount">${renderSourcePicker()}</div>
         <div id="obsZoomWarningModalMount">${renderWarningModal()}</div>
         <div class="spacer"></div>
@@ -551,7 +599,19 @@
           api.setStatus?.(`Move Plugin Download konnte nicht geoeffnet werden: ${String(error?.message || error || "unknown_error")}`);
         }
       });
+      root.querySelector("#obsZoomTestTrigger")?.addEventListener("input", (ev) => {
+        OBS_TEST_TRIGGER = normalizeText(ev.target?.value).toUpperCase();
+      });
+      root.querySelector("#btnObsZoomTestTrigger")?.addEventListener("click", async () => {
+        await runObsZoomTriggerTest(api, root, root.querySelector("#obsZoomTestTrigger")?.value || OBS_TEST_TRIGGER);
+      });
       root.addEventListener("click", async (ev) => {
+        const testPresetBtn = ev.target?.closest?.("[data-obs-zoom-test-preset]");
+        if (testPresetBtn) {
+          await runObsZoomTriggerTest(api, root, String(testPresetBtn.dataset.obsZoomTestPreset || ""));
+          return;
+        }
+
         const sourcePickBtn = ev.target?.closest?.("[data-obs-scene-source-pick]");
         if (sourcePickBtn) {
           OBS_SELECTED_SOURCE = String(sourcePickBtn.dataset.obsSceneSourcePick || "").trim();
@@ -624,6 +684,7 @@
       if (triplesInput) triplesInput.checked = OBS_INCLUDE_TRIPLES;
       api.setValue(root, "obsZoomEasingType", OBS_EASING_TYPE);
       api.setValue(root, "obsZoomEasingFunction", OBS_EASING_FUNCTION);
+      api.setValue(root, "obsZoomTestTrigger", OBS_TEST_TRIGGER);
       const connectionWrap = root.querySelector("#obsZoomConnectionWrap");
       if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
       const connectionToggle = root.querySelector("#obsZoomConnectionToggle");

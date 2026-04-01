@@ -24,6 +24,17 @@
     return `${match[1]}${String(number).padStart(2, "0")}`;
   }
 
+  function normalizeManualTestTrigger(value) {
+    const text = normalizeText(value);
+    if (!text) return { key: "", managedKey: "", checkoutKey: "" };
+    const normalizedKey = normalizeTriggerKey(text);
+    const managedKey = normalizeManagedFilterKey(text);
+    const checkoutKey = managedKey
+      ? `checkout_${managedKey.toLowerCase()}`
+      : (normalizedKey.startsWith("checkout_") ? normalizedKey : "");
+    return { key: normalizedKey, managedKey, checkoutKey };
+  }
+
   function isManagedMoveFilter(filter) {
     const filterKind = normalizeText(filter?.filterKind).toLowerCase();
     if (filterKind && filterKind !== "move_source_filter") return false;
@@ -270,8 +281,31 @@
     }
   }
 
+  async function triggerTestInput(rawTrigger, payload = {}) {
+    if (!isModuleActive()) return { ok: false, reason: "module_disabled" };
+
+    const parsed = normalizeManualTestTrigger(rawTrigger);
+    if (parsed.managedKey && parsed.managedKey !== "MAIN") {
+      const checkoutKey = parsed.checkoutKey || `checkout_${parsed.managedKey.toLowerCase()}`;
+      const manualPayload = {
+        ...payload,
+        effect: "manual_test",
+        recommendedSegment: parsed.managedKey,
+        recommendedSegments: [parsed.managedKey],
+        recommendedThrow: parsed.managedKey.toLowerCase()
+      };
+      const ok = await applyAutomaticCheckoutFilter(checkoutKey, manualPayload);
+      return { ok, trigger: checkoutKey, managedKey: parsed.managedKey, mode: "managed_filter" };
+    }
+
+    if (!parsed.key) return { ok: false, reason: "missing_trigger" };
+    handleActionTrigger(parsed.key, { ...payload, effect: "manual_test" });
+    return { ok: true, trigger: parsed.key, managedKey: parsed.managedKey || "", mode: "trigger" };
+  }
+
   AD_SB.obsZoom = {
     handleActionTrigger,
-    parseEffects: parseObsZoomEffects
+    parseEffects: parseObsZoomEffects,
+    triggerTestInput
   };
 })(self);

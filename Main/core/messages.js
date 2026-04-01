@@ -392,6 +392,12 @@
             return;
           }
 
+          if (msg?.type === "OBS_ZOOM_TRIGGER_TEST") {
+            const result = await AD_SB.obsZoom?.triggerTestInput?.(msg?.trigger, msg?.payload || {});
+            sendResponse({ ok: !!result?.ok, ...(result || {}) });
+            return;
+          }
+
           if (msg?.type === "GET_OVERLAY_STATE") {
             sendResponse({ ok: true, payload: AD_SB.overlay.getState() });
             return;
