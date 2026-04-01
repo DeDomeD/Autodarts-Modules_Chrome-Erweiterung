@@ -1142,7 +1142,4 @@
     handleState,
     handleUiEvent
   };
-
-  // Temporary compatibility shim while the old effects module is phased out of routing.
-  AD_SB.effects = AD_SB.effects || {};
 })(self);

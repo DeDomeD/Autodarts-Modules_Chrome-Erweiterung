@@ -33,7 +33,6 @@ importScripts(
   extUrl("Main/core/sb-client.js"),
   extUrl("Main/core/obs-client.js"),
   extUrl("Modules/overlay/engine.js"),
-  extUrl("Modules/effects/engine.js"),
   extUrl("Modules/obszoom/engine.js"),
   extUrl("Main/core/messages.js")
 );
