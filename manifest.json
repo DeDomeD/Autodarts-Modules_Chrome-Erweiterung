@@ -8,7 +8,7 @@
     "48": "Main/assets/ICON.png",
     "128": "Main/assets/ICON.png"
   },
-  "permissions": ["storage", "scripting", "tabs"],
+  "permissions": ["storage", "scripting", "tabs", "sidePanel"],
   "description": "Autodarts modules with Streamer.bot integration and overlay tooling.",
   "host_permissions": [
     "https://play.autodarts.io/*",
@@ -40,7 +40,10 @@
       "16": "Main/assets/ICON_grau_16.png",
       "32": "Main/assets/ICON_grau_32.png"
     },
-    "default_popup": "Main/popup.html"
+    "default_title": "Autodarts Modules"
+  },
+  "side_panel": {
+    "default_path": "Main/popup.html"
   },
   "web_accessible_resources": [
     {
