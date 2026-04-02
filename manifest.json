@@ -8,7 +8,7 @@
     "48": "Main/assets/ICON.png",
     "128": "Main/assets/ICON.png"
   },
-  "permissions": ["storage", "scripting", "tabs", "sidePanel"],
+  "permissions": ["storage", "scripting", "tabs", "sidePanel", "windows"],
   "description": "Autodarts modules with Streamer.bot integration and overlay tooling.",
   "host_permissions": [
     "https://play.autodarts.io/*",

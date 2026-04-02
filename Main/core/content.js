@@ -50,9 +50,25 @@ function ensureBridge() {
 function checkRouteChangeAndBridge() {
   const href = String(location.href || "");
   if (href === lastKnownHref) return;
+  let previousPathname = "";
+  try {
+    previousPathname = new URL(lastKnownHref).pathname || "";
+  } catch {
+    previousPathname = "";
+  }
+  const pathname = String(location.pathname || "");
   lastKnownHref = href;
   ensureBridge();
   pingAutodartsTabActive();
+  safeSend({
+    type: "AUTODARTS_NAVIGATION",
+    payload: {
+      href,
+      pathname,
+      previousPathname,
+      ts: Date.now()
+    }
+  });
 }
 
 function isUndoButton(btn) {
@@ -80,6 +96,23 @@ function isUndoButton(btn) {
   return !!(btn.querySelector("svg") && (cls.includes("undo") || cls.includes("revert") || cls.includes("back")));
 }
 
+function getButtonLabel(btn) {
+  if (!btn) return "";
+  const candidates = [
+    btn.getAttribute?.("data-testid"),
+    btn.getAttribute?.("aria-label"),
+    btn.getAttribute?.("title"),
+    btn.getAttribute?.("name"),
+    btn.innerText,
+    btn.textContent
+  ];
+  for (const value of candidates) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
 window.addEventListener("click", (ev) => {
   if (!isMatchPage()) return;
 
@@ -88,10 +121,16 @@ window.addEventListener("click", (ev) => {
   const btn = target.closest("button, [role='button']");
   if (!btn) return;
 
+  const buttonLabel = getButtonLabel(btn);
+  safeSend({
+    type: "AUTODARTS_UI_EVENT",
+    payload: { kind: "button_press", label: buttonLabel, ts: Date.now() }
+  });
+
   if (isUndoButton(btn)) {
     safeSend({
       type: "AUTODARTS_UI_EVENT",
-      payload: { kind: "undo_click", ts: Date.now() }
+      payload: { kind: "undo_click", label: buttonLabel || "Undo", ts: Date.now() }
     });
   }
 }, true);

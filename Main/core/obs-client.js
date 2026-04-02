@@ -268,6 +268,44 @@
     return names;
   }
 
+  async function getObsSourceFilters(sourceName) {
+    const targetSource = String(sourceName || "").trim();
+    if (!targetSource) throw new Error("missing_source_name");
+    const connected = await ensureObsConnection();
+    if (!connected) throw new Error("obs_not_connected");
+    const response = await sendObsRequestAwait("GetSourceFilterList", { sourceName: targetSource }, 5000);
+    return Array.isArray(response?.responseData?.filters) ? response.responseData.filters : [];
+  }
+
+  async function getObsSourceFilter(sourceName, filterName) {
+    const targetSource = String(sourceName || "").trim();
+    const targetFilter = String(filterName || "").trim();
+    if (!targetSource) throw new Error("missing_source_name");
+    if (!targetFilter) throw new Error("missing_filter_name");
+    const connected = await ensureObsConnection();
+    if (!connected) throw new Error("obs_not_connected");
+    const response = await sendObsRequestAwait("GetSourceFilter", {
+      sourceName: targetSource,
+      filterName: targetFilter
+    }, 5000);
+    return response?.responseData || {};
+  }
+
+  async function setObsSourceFilterEnabled(sourceName, filterName, filterEnabled) {
+    const targetSource = String(sourceName || "").trim();
+    const targetFilter = String(filterName || "").trim();
+    if (!targetSource) throw new Error("missing_source_name");
+    if (!targetFilter) throw new Error("missing_filter_name");
+    const connected = await ensureObsConnection();
+    if (!connected) throw new Error("obs_not_connected");
+    await sendObsRequestAwait("SetSourceFilterEnabled", {
+      sourceName: targetSource,
+      filterName: targetFilter,
+      filterEnabled: !!filterEnabled
+    }, 5000);
+    return true;
+  }
+
   async function getObsSceneSources(sceneName) {
     const targetScene = String(sceneName || "").trim();
     if (!targetScene) throw new Error("missing_scene_name");
@@ -389,6 +427,10 @@
       updated,
       errors
     };
+  }
+
+  function getObsMoveFilterNameList(options = {}) {
+    return getDesiredMoveFilterNames(options);
   }
 
   async function deleteObsMoveFilters(sceneName, options = {}) {
@@ -951,11 +993,15 @@
   AD_SB.sendObsRequestAwait = sendObsRequestAwait;
   AD_SB.getObsStatus = getObsStatus;
   AD_SB.getObsScenes = getObsScenes;
+  AD_SB.getObsSourceFilters = getObsSourceFilters;
+  AD_SB.getObsSourceFilter = getObsSourceFilter;
+  AD_SB.setObsSourceFilterEnabled = setObsSourceFilterEnabled;
   AD_SB.getObsSceneSources = getObsSceneSources;
   AD_SB.createObsMoveFilters = createObsMoveFilters;
   AD_SB.deleteObsMoveFilters = deleteObsMoveFilters;
   AD_SB.getObsMoveFilterBackup = getObsMoveFilterBackup;
   AD_SB.importObsMoveFilterBackup = importObsMoveFilterBackup;
+  AD_SB.getObsMoveFilterNameList = getObsMoveFilterNameList;
   AD_SB.refreshObsConnection = () => {
     if (shouldUseObsConnection()) return ensureObsConnection();
     stopObsConnection("disabled");

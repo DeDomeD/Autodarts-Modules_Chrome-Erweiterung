@@ -15,7 +15,9 @@
       obsZoomIncludeSingles: true,
       obsZoomIncludeDoubles: true,
       obsZoomIncludeTriples: true,
-      obsZoomLastTestTrigger: "T20"
+      obsZoomLastTestTrigger: "T20",
+      obsZoomPlayerFilterMode: "all",
+      obsZoomPlayerNamesList: ""
     },
     actionDefaults: {
       checkout: "Checkout"
@@ -37,7 +39,9 @@
         obsZoomSource: "Game Capture",
         obsZoomSceneName: "",
         obsZoomTargetSource: "",
-        obsZoomEffectsJson: "[]"
+        obsZoomEffectsJson: "[]",
+        obsZoomPlayerFilterMode: "all",
+        obsZoomPlayerNamesList: ""
       }
     }
   };

@@ -4,7 +4,6 @@
  * - lädt alle Module (Settings, Effects, Overlay, Routing)
  * - startet danach die Initialisierung über `AD_SB.init()`
  */
-console.log("[Autodarts Modules] Websiten Daten werden erfasst");
 
 self.AD_SB = self.AD_SB || {};
 
@@ -38,4 +37,14 @@ importScripts(
   extUrl("Main/core/messages.js")
 );
 
-self.AD_SB.init();
+(async () => {
+  try {
+    await self.AD_SB.init();
+    console.log("[Autodart Modules / ADM] Wurde erfolgreich geladen...");
+  } catch (error) {
+    console.error(
+      "[Autodart Modules / ADM] Bei der Extension ist ein Fehler aufgetreten. Fehlerlog: Debug Logs (Einstellungen).",
+      error
+    );
+  }
+})();

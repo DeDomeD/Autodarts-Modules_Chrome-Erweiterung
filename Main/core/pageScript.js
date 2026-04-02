@@ -734,6 +734,46 @@
       return;
     }
 
+    // Game-Start manchmal im State-/Match-Channel, nicht unter game-events
+    if (!isGameEventTopic && payload && typeof payload === "object") {
+      const quickEvRaw = pickFirstValue([
+        payload.event,
+        payload.eventType,
+        findNestedValueByKeys(payload, ["event", "eventType"]),
+        payload.data && typeof payload.data === "object" ? payload.data.event : null,
+        payload.message && typeof payload.message === "object" ? payload.message.event : null
+      ]);
+      const quickEv = String(quickEvRaw || "").trim();
+      if (quickEv) {
+        const qk = quickEv.toLowerCase().replace(/[\s._-]+/g, "");
+        const qVar = new Set([qk]);
+        if (qk.endsWith("event") && qk.length > 5) qVar.add(qk.slice(0, -5));
+        const startKeys = new Set([
+          "gamestarted",
+          "matchstarted",
+          "boardstarted",
+          "gameon",
+          "gamebegin",
+          "matchbegin",
+          "boardbegin"
+        ]);
+        if ([...qVar].some((k) => startKeys.has(k))) {
+          const p = normalizeGameEvent({
+            event: quickEv,
+            matchId: pickFirstValue([
+              payload.matchId,
+              findNestedValueByKeys(payload, ["matchId", "match_id", "id"])
+            ]),
+            set: pickFirstValue([payload.set, findNestedValueByKeys(payload, ["set", "setNumber", "currentSet"])]),
+            leg: pickFirstValue([payload.leg, findNestedValueByKeys(payload, ["leg", "legNumber", "currentLeg"])]),
+            round: pickFirstValue([payload.round, findNestedValueByKeys(payload, ["round", "roundNumber"])]),
+            raw: payload
+          });
+          if (p && p.type === "event") post(p);
+        }
+      }
+    }
+
     if (isStateTopic || looksStateLike) {
       postCapture("ws_state", payload, {
         topic,

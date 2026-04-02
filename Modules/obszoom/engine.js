@@ -71,6 +71,7 @@
 
   async function applyManagedFilterByKey(managedKey, payload = {}) {
     const settings = AD_SB.getSettings?.() || {};
+    if (!obsZoomPlayerFilterAllows(settings, payload)) return false;
     const targetSegment = normalizeManagedFilterKey(managedKey);
     if (!targetSegment) return false;
 
@@ -98,19 +99,13 @@
       }
     }
 
-    const verifyResponse = await AD_SB.sendObsRequestAwait?.("GetSourceFilter", {
-      sourceName: resolved.sourceName,
-      filterName: resolved.targetFilter.filterName
-    }, 5000);
-    if (verifyResponse?.responseData?.filterEnabled !== true && !changed) {
+    const verifyResponse = await AD_SB.getObsSourceFilter?.(resolved.sourceName, resolved.targetFilter.filterName);
+    if (verifyResponse?.filterEnabled !== true && !changed) {
       await setSceneFilterEnabled(resolved.sourceName, resolved.targetFilter.filterName, true);
     }
 
-    const verifiedTargetResponse = await AD_SB.sendObsRequestAwait?.("GetSourceFilter", {
-      sourceName: resolved.sourceName,
-      filterName: resolved.targetFilter.filterName
-    }, 5000);
-    if (verifiedTargetResponse?.responseData?.filterEnabled !== true) {
+    const verifiedTargetResponse = await AD_SB.getObsSourceFilter?.(resolved.sourceName, resolved.targetFilter.filterName);
+    if (verifiedTargetResponse?.filterEnabled !== true) {
       return false;
     }
 
@@ -127,17 +122,12 @@
   async function getManagedFiltersForSource(sourceName) {
     const target = normalizeText(sourceName);
     if (!target) return [];
-    const response = await AD_SB.sendObsRequestAwait?.("GetSourceFilterList", { sourceName: target }, 5000);
-    return (Array.isArray(response?.responseData?.filters) ? response.responseData.filters : [])
-      .filter(isManagedMoveFilter);
+    const filters = await AD_SB.getObsSourceFilters?.(target);
+    return (Array.isArray(filters) ? filters : []).filter(isManagedMoveFilter);
   }
 
   async function setSceneFilterEnabled(sceneName, filterName, filterEnabled) {
-    await AD_SB.sendObsRequestAwait?.("SetSourceFilterEnabled", {
-      sourceName: sceneName,
-      filterName,
-      filterEnabled: !!filterEnabled
-    }, 5000);
+    await AD_SB.setObsSourceFilterEnabled?.(sceneName, filterName, !!filterEnabled);
   }
 
   async function applyAutomaticCheckoutFilter(triggerKey, payload = {}) {
@@ -194,20 +184,14 @@
       }
     }
 
-    const verifyResponse = await AD_SB.sendObsRequestAwait?.("GetSourceFilter", {
-      sourceName: activeSourceName,
-      filterName: targetFilter.filterName
-    }, 5000);
-    const verifiedEnabled = verifyResponse?.responseData?.filterEnabled === true;
+    const verifyResponse = await AD_SB.getObsSourceFilter?.(activeSourceName, targetFilter.filterName);
+    const verifiedEnabled = verifyResponse?.filterEnabled === true;
     if (!verifiedEnabled && !changed) {
       await setSceneFilterEnabled(activeSourceName, targetFilter.filterName, true);
     }
 
-    const verifiedTargetResponse = await AD_SB.sendObsRequestAwait?.("GetSourceFilter", {
-      sourceName: activeSourceName,
-      filterName: targetFilter.filterName
-    }, 5000);
-    if (verifiedTargetResponse?.responseData?.filterEnabled !== true) {
+    const verifiedTargetResponse = await AD_SB.getObsSourceFilter?.(activeSourceName, targetFilter.filterName);
+    if (verifiedTargetResponse?.filterEnabled !== true) {
       if (settings?.debugAllLogs) {
         console.log("[Autodarts Modules] checkout auto zoom failed", {
           reason: "verify_not_enabled",
@@ -282,15 +266,63 @@
     return installed.map((item) => String(item || "").trim().toLowerCase()).includes("obszoom");
   }
 
+  function parseObsZoomPlayerNamesList(raw) {
+    return String(raw || "")
+      .split(/[\n,;]+/)
+      .map((s) => normalizeText(s).toLowerCase())
+      .filter(Boolean);
+  }
+
+  function resolvePlayerForObsZoomFilter(payload) {
+    if (!payload || typeof payload !== "object") {
+      return { index: NaN, nameLower: "" };
+    }
+    let idx = Number(payload.player ?? payload.playerIndex);
+    let name = normalizeText(payload.playerName);
+
+    if (!Number.isFinite(idx) && payload.state && typeof payload.state === "object") {
+      const sp = payload.state.player;
+      if (Number.isFinite(Number(sp))) idx = Number(sp);
+    }
+    if (!name && Array.isArray(payload.darts) && payload.darts.length) {
+      const last = payload.darts[payload.darts.length - 1];
+      if (last && typeof last === "object") {
+        if (!Number.isFinite(idx) && Number.isFinite(Number(last.player))) idx = Number(last.player);
+        if (!name && last.playerName) name = normalizeText(last.playerName);
+      }
+    }
+    return { index: idx, nameLower: name.toLowerCase() };
+  }
+
+  function obsZoomPlayerFilterAllows(settings, payload) {
+    if (!payload || typeof payload !== "object") return true;
+    if (payload.effect === "manual_test") return true;
+
+    const mode = String(settings?.obsZoomPlayerFilterMode || "all").toLowerCase();
+    if (mode === "all") return true;
+
+    const { index: pIdx, nameLower: pName } = resolvePlayerForObsZoomFilter(payload);
+    const myIdx = Number(settings?.myPlayerIndex);
+
+    const names = parseObsZoomPlayerNamesList(settings?.obsZoomPlayerNamesList);
+    const myIndexOk = Number.isFinite(myIdx) && Number.isFinite(pIdx) && pIdx === myIdx;
+    const nameOk = names.length > 0 && !!pName && names.includes(pName);
+
+    if (mode === "my_index") return myIndexOk;
+    if (mode === "names") {
+      if (!names.length) return false;
+      return nameOk;
+    }
+    if (mode === "my_index_or_names") {
+      if (!names.length) return myIndexOk;
+      return myIndexOk || nameOk;
+    }
+    return true;
+  }
+
   function applyFilterEffect(item, payload = {}) {
     const filterEnabled = item.filterAction !== "disable";
-    const requestData = {
-      sourceName: item.sourceName,
-      filterName: item.filterName,
-      filterEnabled
-    };
-    const ok = AD_SB.sendObsRequest?.("SetSourceFilterEnabled", requestData);
-    if (!ok) return false;
+    void AD_SB.setObsSourceFilterEnabled?.(item.sourceName, item.filterName, filterEnabled).catch(() => {});
     try {
       if (AD_SB.getSettings?.()?.debugObs || AD_SB.getSettings?.()?.debugAllLogs) {
         console.log("[Autodarts Modules] OBS zoom trigger", {
@@ -316,6 +348,7 @@
   function handleActionTrigger(triggerKey, payload = {}) {
     if (!isModuleActive()) return;
     const settings = AD_SB.getSettings?.() || {};
+    if (!obsZoomPlayerFilterAllows(settings, payload)) return;
     const items = parseObsZoomEffects(settings.obsZoomEffectsJson);
     const key = normalizeTriggerKey(triggerKey);
     if (!key) return;

@@ -31,6 +31,8 @@
     attempts: 0,
     exhausted: false
   };
+  const sbMessageListeners = new Set();
+  const sbCustomEventSubscriptions = new Set();
 
   function setSBStatus(next) {
     sbStatus.state = String(next?.state || sbStatus.state || "unknown");
@@ -47,6 +49,10 @@
 
   function makeId() {
     return "ad-sb-" + Date.now() + "-" + Math.floor(Math.random() * 999999);
+  }
+
+  function makeSubscriptionKey(source, type) {
+    return `${String(source || "").trim()}:${String(type || "").trim()}`;
   }
 
   function clearReconnectTimer() {
@@ -104,11 +110,15 @@
     sbHandshakeDone = true;
     sbAuthRequestId = "";
     setSBStatus({ state: "connected", url, lastError: "" });
-    console.log(`[Autodarts Modules] Streamer.bot connected (${url})`);
+    const settings = AD_SB.getSettings?.() || {};
+    if (settings.debugActions || settings.debugAllLogs) {
+      console.log(`[Autodarts Modules] Streamer.bot connected (${url})`);
+    }
     try { AD_SB.logger?.info?.("sb", "streamerbot ws ready", { queued: actionQueue.length }); } catch {}
     sbConnecting = false;
     sbOutageActive = false;
     clearReconnectTimer();
+    sendSubscriptionRequest();
     flushActionQueue();
   }
 
@@ -131,6 +141,42 @@
     sbOutageActive = false;
     if (reason === "manual" || reason === "disabled") resetRetryState();
     setSBStatus({ state: "disconnected", lastError: reason });
+  }
+
+  function notifySBMessageListeners(message) {
+    for (const listener of Array.from(sbMessageListeners)) {
+      try { listener(message); } catch {}
+    }
+  }
+
+  function buildSubscriptionEventsObject() {
+    const events = {};
+    for (const key of sbCustomEventSubscriptions) {
+      const splitIndex = key.indexOf(":");
+      if (splitIndex < 0) continue;
+      const source = key.slice(0, splitIndex);
+      const type = key.slice(splitIndex + 1);
+      if (!source || !type) continue;
+      if (!Array.isArray(events[source])) events[source] = [];
+      if (!events[source].includes(type)) events[source].push(type);
+    }
+    return events;
+  }
+
+  function sendSubscriptionRequest() {
+    if (!sbSocket || sbSocket.readyState !== WebSocket.OPEN || !sbHandshakeDone) return false;
+    const events = buildSubscriptionEventsObject();
+    if (!Object.keys(events).length) return true;
+    try {
+      sbSocket.send(JSON.stringify({
+        request: "Subscribe",
+        id: makeId(),
+        events
+      }));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function scheduleReconnect(reason = "unknown") {
@@ -231,7 +277,10 @@
         }
         setSBStatus({ state: "disconnected", url, lastError: String(data?.error || "auth_failed") });
         try { sbSocket?.close(); } catch {}
+        return;
       }
+
+      notifySBMessageListeners(data);
     };
 
     sbSocket.onerror = (e) => {
@@ -438,9 +487,28 @@
     });
   }
 
+  function subscribeSBMessages(listener) {
+    if (typeof listener !== "function") return () => {};
+    sbMessageListeners.add(listener);
+    return () => {
+      sbMessageListeners.delete(listener);
+    };
+  }
+
+  function subscribeCustomEvent(source, type) {
+    const eventSource = String(source || "").trim();
+    const eventType = String(type || "").trim();
+    if (!eventSource || !eventType) return false;
+    sbCustomEventSubscriptions.add(makeSubscriptionKey(eventSource, eventType));
+    sendSubscriptionRequest();
+    return true;
+  }
+
   AD_SB.fireActionByKey = fireActionByKey;
   AD_SB.connectOnceForTest = connectOnceForTest;
   AD_SB.ensureSBConnection = ensureSBConnection;
+  AD_SB.subscribeSBMessages = subscribeSBMessages;
+  AD_SB.subscribeSBCustomEvent = subscribeCustomEvent;
   AD_SB.disconnectSBConnection = disconnectSBConnection;
   AD_SB.retrySBConnection = () => {
     resetRetryState();

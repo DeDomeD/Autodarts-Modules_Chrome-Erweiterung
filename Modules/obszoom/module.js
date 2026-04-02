@@ -125,6 +125,15 @@
     return OBS_SCENES.map((sceneName) => `<option value="${sceneName}">${sceneName}</option>`).join("");
   }
 
+  function renderSourceOptions(api) {
+    const lang = String(api?.getSettings?.()?.uiLanguage || "de").toLowerCase();
+    const emptyLabel = lang === "en" ? "No sources" : "Keine Quellen";
+    if (!OBS_SCENE_SOURCES.length) {
+      return `<option value="">${emptyLabel}</option>`;
+    }
+    return OBS_SCENE_SOURCES.map((sourceName) => `<option value="${sourceName}">${sourceName}</option>`).join("");
+  }
+
   function renderSourcePicker() {
     if (!SOURCE_PICKER_OPEN) return "";
     return `
@@ -234,7 +243,7 @@
       const storedSource = normalizeText(api.getSettings?.()?.obsZoomTargetSource);
       if (OBS_SCENE_SOURCES.includes(storedSource)) OBS_SELECTED_SOURCE = storedSource;
       if (!OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) OBS_SELECTED_SOURCE = OBS_SCENE_SOURCES[0] || "";
-      SOURCE_PICKER_OPEN = OBS_SCENE_SOURCES.length > 1;
+      // Quellen-Auswahl-Modal nur nach Create/Update (runCreateMoveFiltersFlow), nie bei passivem Laden
       const persist = { obsZoomSceneName: targetScene };
       if (OBS_SELECTED_SOURCE && OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) {
         persist.obsZoomTargetSource = OBS_SELECTED_SOURCE;
@@ -304,17 +313,20 @@
       api.setStatus?.("In dieser Szene wurde keine Quelle gefunden.");
       return;
     }
-    if (OBS_SCENE_SOURCES.length > 1) {
-      SOURCE_PICKER_OPEN = true;
-      OBS_SELECTED_SOURCE = "";
-      WARNING_MODAL_ACTION = async () => {};
-      root.dataset.obsZoomPendingMode = mode;
-      scope.AD_SB_MODULES.obszoom.sync(api, api.getSettings?.() || {});
-      api.setStatus?.("Bitte waehle die OBS Quelle fuer die Move Filter aus.");
+    let picked = normalizeText(root.querySelector("#obsZoomSourceSelect")?.value);
+    if (picked && OBS_SCENE_SOURCES.includes(picked)) {
+      OBS_SELECTED_SOURCE = picked;
+    } else if (OBS_SELECTED_SOURCE && OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) {
+      picked = OBS_SELECTED_SOURCE;
+    } else {
+      picked = normalizeText(OBS_SCENE_SOURCES[0] || "");
+      OBS_SELECTED_SOURCE = picked;
+    }
+    if (!picked) {
+      api.setStatus?.("Bitte eine Quelle waehlen.");
       return;
     }
-    OBS_SELECTED_SOURCE = OBS_SCENE_SOURCES[0] || "";
-    await createMoveFiltersForSelection(api, root, OBS_SELECTED_SOURCE, mode);
+    await createMoveFiltersForSelection(api, root, picked, mode);
   }
 
   async function runDeleteMoveFiltersFlow(api, root) {
@@ -415,6 +427,25 @@
         </div>
 
         <div class="card">
+          <div class="sectionTitle" data-i18n="obszoom_section_player_filter">Zoom: Wer triggert</div>
+          <div class="hint" data-i18n="obszoom_player_filter_hint">Steuert, bei welchen Spielern OBS-Zoom auf Würfe und Checkout-Hinweise reagiert. „Mein Spieler-Index“ kommt aus den Einstellungen.</div>
+          <div class="formRow">
+            <label class="label" for="obsZoomPlayerFilterMode" data-i18n="obszoom_player_filter_mode_label">Modus</label>
+            <select class="input" id="obsZoomPlayerFilterMode">
+              <option value="all" data-i18n="obszoom_player_filter_mode_all">Alle Spieler</option>
+              <option value="my_index" data-i18n="obszoom_player_filter_mode_my_index">Nur mein Spielerindex</option>
+              <option value="names" data-i18n="obszoom_player_filter_mode_names">Nur folgende Namen</option>
+              <option value="my_index_or_names" data-i18n="obszoom_player_filter_mode_my_or_names">Mein Index oder Namen</option>
+            </select>
+          </div>
+          <div class="formRow">
+            <label class="label" for="obsZoomPlayerNamesList" data-i18n="obszoom_player_names_label">Namen</label>
+            <textarea class="input" id="obsZoomPlayerNamesList" rows="3" placeholder="z. B. pro Zeile oder mit Komma"></textarea>
+            <div class="hint" data-i18n="obszoom_player_names_hint">Eine Zeile oder Komma getrennt; Groß/klein egal. Bei „Nur Namen“ mindestens einen Eintrag.</div>
+          </div>
+        </div>
+
+        <div class="card">
           <div class="sectionTitle" style="margin:0 0 12px 0;">OBS Szenen</div>
           <div class="hint" style="margin-bottom:12px;">Hier werden alle Filter automatisch erstellt, eine manuelle Ausrichtung in OBS wird jedoch weiterhin benoetigt.</div>
           <div class="formRow">
@@ -422,18 +453,26 @@
             <input class="input" id="obsZoomCheckoutTriggerThreshold" type="number" min="2" max="170" step="1" value="170" />
             <div class="hint">Ab diesem Restwert und darunter wird der Checkout-Trigger aktiv.</div>
           </div>
-          <div class="formRow">
-            <label class="label" for="obsZoomSceneSelect" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-              <span>Szene</span>
-              <button class="miniChevronBtn" id="btnRefreshObsScenes" type="button" title="Szenen aktualisieren" aria-label="Szenen aktualisieren" style="min-width:28px; width:28px; height:28px; padding:0;">
-                <span class="refreshGlyph"></span>
-              </button>
-            </label>
-            <select class="input" id="obsZoomSceneSelect">
-              ${renderSceneOptions()}
-            </select>
-            <div class="hint">Diese Szene wird auch fuer automatische Checkout-Trigger verwendet.</div>
+          <div class="formRow obsZoomSceneSourceRow">
+            <div class="obsZoomSceneCol">
+              <div class="obsZoomSceneSelectHead">
+                <label class="label" for="obsZoomSceneSelect" data-i18n="obszoom_scene_label">Szene</label>
+                <button class="miniChevronBtn" id="btnRefreshObsScenes" type="button" title="Szenen aktualisieren" aria-label="Szenen aktualisieren" style="min-width:28px; width:28px; height:28px; padding:0;">
+                  <span class="refreshGlyph"></span>
+                </button>
+              </div>
+              <select class="input" id="obsZoomSceneSelect">
+                ${renderSceneOptions()}
+              </select>
+            </div>
+            <div class="obsZoomSourceCol">
+              <label class="label" for="obsZoomSourceSelect" data-i18n="obszoom_source_label">Quelle</label>
+              <select class="input" id="obsZoomSourceSelect">
+                ${renderSourceOptions(null)}
+              </select>
+            </div>
           </div>
+          <div class="hint">Diese Szene wird auch fuer automatische Checkout-Trigger verwendet.</div>
           <div class="formRow">
             <label class="label" for="obsZoomMoveDuration">Duration (ms)</label>
             <input class="input" id="obsZoomMoveDuration" type="number" min="0" step="50" value="300" />
@@ -534,10 +573,17 @@
       api.bindAutoImmediate(root, "obsZoomSbPassword", "sbPassword", (value) => String(value || ""));
       api.bindAutoImmediate(root, "obsZoomActionPrefix", "actionPrefix", (value) => api.normalizePrefix(value || ""));
       api.bindAuto(root, "obsZoomCheckoutTriggerThreshold", "checkoutTriggerThreshold", "number");
+      api.bindAuto(root, "obsZoomPlayerFilterMode", "obsZoomPlayerFilterMode", "text");
+      api.bindAutoImmediate(root, "obsZoomPlayerNamesList", "obsZoomPlayerNamesList", (value) => String(value || ""));
       root.querySelector("#obsZoomSceneSelect")?.addEventListener("change", async (ev) => {
         const sceneName = normalizeText(ev.target?.value);
         await api.savePartial?.({ obsZoomSceneName: sceneName });
         await reloadObsSceneSources(api, root, sceneName, true);
+      });
+      root.querySelector("#obsZoomSourceSelect")?.addEventListener("change", async (ev) => {
+        const name = normalizeText(ev.target?.value);
+        OBS_SELECTED_SOURCE = name;
+        if (name) await api.savePartial?.({ obsZoomTargetSource: name });
       });
       root.querySelector("#obsZoomMoveDuration")?.addEventListener("input", (ev) => {
         OBS_MOVE_DURATION = Math.max(0, Number(ev.target?.value || OBS_MOVE_DURATION) || 0);
@@ -615,6 +661,7 @@
           "Loeschen"
         );
       });
+
       root.querySelector("#btnExportObsMoveFilterBackup")?.addEventListener("click", async () => {
         const sceneName = String(root.querySelector("#obsZoomSceneSelect")?.value || "").trim();
         if (!sceneName) {
@@ -698,6 +745,42 @@
       root.querySelector("#btnObsZoomTestTrigger")?.addEventListener("click", async () => {
         await runObsZoomTriggerTest(api, root, root.querySelector("#obsZoomTestTrigger")?.value || OBS_TEST_TRIGGER);
       });
+      function attachObsZoomPanelActivationLoad() {
+        const pageEl = root;
+        if (!pageEl || pageEl.dataset.obsZoomObsActivationBound === "1") return;
+        pageEl.dataset.obsZoomObsActivationBound = "1";
+        let debounceTimer = null;
+        let inFlight = false;
+        const runLoad = async () => {
+          if (!pageEl.classList.contains("active")) return;
+          if (pageEl.classList.contains("pageDisabled")) return;
+          if (inFlight) return;
+          inFlight = true;
+          try {
+            await reloadObsScenes(api, root, true);
+            const sel = normalizeText(root.querySelector("#obsZoomSceneSelect")?.value);
+            if (sel) await reloadObsSceneSources(api, root, sel, true);
+          } catch {
+            /* still silent */
+          } finally {
+            inFlight = false;
+          }
+        };
+        const schedule = () => {
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            debounceTimer = null;
+            void runLoad();
+          }, 40);
+        };
+        const mo = new MutationObserver(() => schedule());
+        mo.observe(pageEl, { attributes: true, attributeFilter: ["class"] });
+        if (pageEl.classList.contains("active") && !pageEl.classList.contains("pageDisabled")) {
+          schedule();
+        }
+      }
+      attachObsZoomPanelActivationLoad();
+
       root.addEventListener("click", async (ev) => {
         const testPresetBtn = ev.target?.closest?.("[data-obs-zoom-test-preset]");
         if (testPresetBtn) {
@@ -745,11 +828,6 @@
           }
         }
       });
-      void (async () => {
-        await reloadObsScenes(api, root, true);
-        const sel = normalizeText(root.querySelector("#obsZoomSceneSelect")?.value);
-        if (sel) await reloadObsSceneSources(api, root, sel, true);
-      })();
     },
     sync(api, settings) {
       const root = api.root;
@@ -788,11 +866,28 @@
           void api.savePartial?.({ obsZoomSceneName: pick });
         }
       }
+      const sourceSelect = root.querySelector("#obsZoomSourceSelect");
+      if (sourceSelect) {
+        sourceSelect.innerHTML = renderSourceOptions(api);
+        const storedSource = normalizeText(s.obsZoomTargetSource);
+        let srcPick = "";
+        if (OBS_SELECTED_SOURCE && OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) srcPick = OBS_SELECTED_SOURCE;
+        else if (storedSource && OBS_SCENE_SOURCES.includes(storedSource)) srcPick = storedSource;
+        else if (OBS_SCENE_SOURCES.length) srcPick = OBS_SCENE_SOURCES[0];
+        if (srcPick && OBS_SCENE_SOURCES.includes(srcPick)) {
+          sourceSelect.value = srcPick;
+          OBS_SELECTED_SOURCE = srcPick;
+        } else {
+          OBS_SELECTED_SOURCE = normalizeText(sourceSelect.value);
+        }
+      }
       const sourcePickerMount = root.querySelector("#obsZoomSourcePickerMount");
       if (sourcePickerMount) sourcePickerMount.innerHTML = renderSourcePicker();
       const warningModalMount = root.querySelector("#obsZoomWarningModalMount");
       if (warningModalMount) warningModalMount.innerHTML = renderWarningModal();
       api.setValue(root, "obsZoomCheckoutTriggerThreshold", Number.isFinite(s.checkoutTriggerThreshold) ? s.checkoutTriggerThreshold : 170);
+      api.setValue(root, "obsZoomPlayerFilterMode", String(s.obsZoomPlayerFilterMode || "all"));
+      api.setValue(root, "obsZoomPlayerNamesList", String(s.obsZoomPlayerNamesList || ""));
       api.setValue(root, "obsZoomMoveDuration", OBS_MOVE_DURATION);
       const singlesInput = root.querySelector("#obsZoomIncludeSingles");
       if (singlesInput) singlesInput.checked = OBS_INCLUDE_SINGLES;

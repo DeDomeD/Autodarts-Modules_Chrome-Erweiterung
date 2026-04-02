@@ -168,9 +168,7 @@
       const stored = await storageGet(["settings"]);
       SETTINGS = normalizeSettings(stored?.settings);
       await storageSet({ settings: SETTINGS });
-      console.log("[Autodarts Modules] Einstellungen wurden geladen");
     } catch (e) {
-      console.error("[Autodarts Modules] Einstellungen konnten nicht geladen werden", e);
       SETTINGS = normalizeSettings(AD_SB.DEFAULTS);
     }
     return SETTINGS;

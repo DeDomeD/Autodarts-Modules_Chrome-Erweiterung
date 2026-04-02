@@ -441,6 +441,12 @@
             return;
           }
 
+          if (msg?.type === "AUTODARTS_NAVIGATION") {
+            AD_SB.autodartsTriggers?.handleNavigation?.(msg.payload);
+            sendResponse({ ok: true });
+            return;
+          }
+
           if (msg?.type === "CLEAR_CAPTURED_DATA") {
             await AD_SB.capture?.clear?.();
             sendResponse({ ok: true });
@@ -512,18 +518,6 @@
               });
             }
 
-            if (settings.debugGameEvents && e.type === "throw") {
-              const idxFromThrow = asValidPlayerIndex(e.player);
-              const idx = lastActivePlayerIndex !== null ? lastActivePlayerIndex : idxFromThrow;
-              const pLabel =
-                (idx !== null && lastPlayerNamesByIndex[idx])
-                  ? lastPlayerNamesByIndex[idx]
-                  : (idx !== null ? `Player ${idx + 1}` : "?");
-              console.log(
-                `[Bridge] throw player=${pLabel} score=${e.score ?? "?"} segment=${e.segment ?? "?"}`
-              );
-            }
-
             if (e.type === "throw") AD_SB.autodartsTriggers?.handleThrow?.(e);
             else if (e.type === "state") AD_SB.autodartsTriggers?.handleState?.(e);
             else if (e.type === "event") AD_SB.autodartsTriggers?.handleGameEvent?.(e);
@@ -538,12 +532,6 @@
             });
             AD_SB.capture?.ingestUi?.(msg.payload);
 
-            if (settings.debugGameEvents) {
-              const kind = msg?.payload?.kind || "unknown";
-              if (kind !== "undo_click") {
-                console.log(`ui event kind="${kind}"`);
-              }
-            }
             AD_SB.autodartsTriggers?.handleUiEvent?.(msg.payload);
             sendResponse({ ok: true });
             return;

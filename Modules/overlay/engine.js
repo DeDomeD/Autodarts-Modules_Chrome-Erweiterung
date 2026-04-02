@@ -164,12 +164,88 @@
   function handleGameEvent() {}
   function handleUiEvent() {}
 
+  function looksLikeOverlayPayload(obj) {
+    if (!obj || typeof obj !== "object") return false;
+    return (
+      obj.leftScore !== undefined ||
+      obj.rightScore !== undefined ||
+      obj.leftName !== undefined ||
+      obj.rightName !== undefined ||
+      obj.startScore !== undefined ||
+      obj.leftSets !== undefined ||
+      obj.rightSets !== undefined
+    );
+  }
+
+  function tryParseJsonObject(raw) {
+    if (typeof raw !== "string") return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function applyExternalOverlayPayload(rawPayload, reason = "external") {
+    if (!rawPayload || typeof rawPayload !== "object") return false;
+    const next = { ...rawPayload };
+    if (next.leftScore !== undefined) runtime.leftScore = asFiniteInt(next.leftScore, runtime.leftScore);
+    if (next.rightScore !== undefined) runtime.rightScore = asFiniteInt(next.rightScore, runtime.rightScore);
+    if (next.leftSets !== undefined) runtime.leftSets = asFiniteInt(next.leftSets, runtime.leftSets);
+    if (next.rightSets !== undefined) runtime.rightSets = asFiniteInt(next.rightSets, runtime.rightSets);
+    if (next.leftLegs !== undefined) runtime.leftLegs = asFiniteInt(next.leftLegs, runtime.leftLegs);
+    if (next.rightLegs !== undefined) runtime.rightLegs = asFiniteInt(next.rightLegs, runtime.rightLegs);
+    if (typeof next.leftName === "string" && next.leftName.trim()) runtime.leftName = next.leftName.trim();
+    if (typeof next.rightName === "string" && next.rightName.trim()) runtime.rightName = next.rightName.trim();
+    if (typeof next.leftCheckout === "string") runtime.leftCheckout = next.leftCheckout;
+    if (typeof next.rightCheckout === "string") runtime.rightCheckout = next.rightCheckout;
+    broadcast(reason);
+    return true;
+  }
+
+  function bindStreamerbotOverlaySubscription() {
+    AD_SB.subscribeSBCustomEvent?.("Custom", "Event");
+    AD_SB.subscribeSBMessages?.((msg) => {
+      const eventSource = String(msg?.event?.source || "");
+      const eventType = String(msg?.event?.type || "");
+      const isCustomEvent = eventSource === "Custom" && eventType === "Event";
+      if (!isCustomEvent && !looksLikeOverlayPayload(msg?.data) && !looksLikeOverlayPayload(msg?.data?.args)) return;
+
+      const data = msg?.data;
+      const eventName = String(
+        data?.eventName ||
+        data?.name ||
+        msg?.event?.name ||
+        ""
+      ).trim().toUpperCase();
+      const hasNamedOverlayEvent = eventName === "AD_SB_OVERLAY_UPDATE";
+      const hasDirectOverlayPayload =
+        looksLikeOverlayPayload(data?.payload) ||
+        looksLikeOverlayPayload(data?.args?.payload) ||
+        looksLikeOverlayPayload(data?.args) ||
+        looksLikeOverlayPayload(data);
+      if (!hasNamedOverlayEvent && !hasDirectOverlayPayload) return;
+
+      if (applyExternalOverlayPayload(data?.payload, "sb_custom_event")) return;
+      const payloadFromJson = tryParseJsonObject(data?.payloadJson);
+      if (applyExternalOverlayPayload(payloadFromJson, "sb_custom_event")) return;
+      const argsPayloadFromJson = tryParseJsonObject(data?.args?.payloadJson);
+      if (applyExternalOverlayPayload(argsPayloadFromJson, "sb_custom_event")) return;
+      if (applyExternalOverlayPayload(data?.args, "sb_custom_event")) return;
+      applyExternalOverlayPayload(data, "sb_custom_event");
+    });
+  }
+
   AD_SB.overlay = {
     bindRuntimePorts,
     getState,
     handleThrow,
     handleState,
     handleGameEvent,
-    handleUiEvent
+    handleUiEvent,
+    applyExternalOverlayPayload
   };
+
+  bindStreamerbotOverlaySubscription();
 })(self);

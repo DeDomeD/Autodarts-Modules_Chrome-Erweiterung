@@ -471,7 +471,7 @@
             <input class="input" id="customEffectName" type="text" placeholder="z. B. Team Winner" />
           </div>
           <div class="formRow">
-            <label class="label" for="customEffectTrigger" data-i18n="custom_effects_trigger_label">Autodarts Aktion</label>
+            <label class="label" for="customEffectTrigger" data-i18n="custom_effects_trigger_label">Autodarts Trigger</label>
             <input class="input" id="customEffectTrigger" type="text" list="customEffectTriggerSuggestions" placeholder="z. B. gameshot, range_100_180, t20_t20_t20" />
             <datalist id="customEffectTriggerSuggestions">${renderCustomEffectTriggerSuggestions({ uiLanguage: "de" })}</datalist>
             <div class="hint">Freier Trigger oder Schnellwahl. Fuer weitere Spieler einfach <code>player_3</code>, <code>player_4</code>, <code>player_5</code> usw. eintragen.</div>

@@ -1,4 +1,4 @@
-﻿const state = {
+const state = {
   leftName: "DOBEY",
   rightName: "WATTIMENA",
   leftScore: 501,
@@ -95,35 +95,12 @@ function applyData(raw) {
   render();
 }
 
-function looksLikeOverlayPayload(obj) {
-  if (!obj || typeof obj !== "object") return false;
-  return (
-    obj.leftScore !== undefined ||
-    obj.rightScore !== undefined ||
-    obj.leftName !== undefined ||
-    obj.rightName !== undefined ||
-    obj.startScore !== undefined ||
-    obj.leftSets !== undefined ||
-    obj.rightSets !== undefined
-  );
-}
-
-function tryParseJsonObject(raw) {
-  if (typeof raw !== "string") return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 function ensureConnectionBadge() {
   if (connectionBadge) return connectionBadge;
   const el = document.createElement("div");
   el.id = "connectionBadge";
   el.className = "connBadge disconnected";
-  el.textContent = "SB Disconnected";
+  el.textContent = "Extension Disconnected";
   document.body.appendChild(el);
   connectionBadge = el;
   return connectionBadge;
@@ -154,120 +131,6 @@ window.addEventListener("message", (ev) => {
   applyData(msg.payload);
 });
 
-function getExtensionSbUrl() {
-  return new Promise((resolve) => {
-    if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
-      resolve("");
-      return;
-    }
-    try {
-      chrome.runtime.sendMessage({ type: "GET_SETTINGS" }, (res) => {
-        const url = String(res?.settings?.sbUrl || "").trim();
-        resolve(url);
-      });
-    } catch {
-      resolve("");
-    }
-  });
-}
-
-async function resolveStreamerbotWsUrl() {
-  const extUrl = await getExtensionSbUrl();
-  if (extUrl) return extUrl;
-
-  const p = new URLSearchParams(window.location.search);
-  const direct = String(p.get("sbws") || p.get("ws") || "").trim();
-  if (direct) return direct;
-  return "ws://127.0.0.1:8080/";
-}
-
-async function connectStreamerbotOverlayFeed() {
-  const wsUrl = await resolveStreamerbotWsUrl();
-  if (!wsUrl) return;
-  setConnectionBadge("disconnected", "SB Disconnected");
-
-  let ws;
-  try {
-    ws = new WebSocket(wsUrl);
-  } catch {
-    setTimeout(connectStreamerbotOverlayFeed, 1500);
-    return;
-  }
-
-  ws.onopen = () => {
-    setConnectionBadge("connected", "SB Connected");
-    try {
-      ws.send(JSON.stringify({
-        request: "Subscribe",
-        id: "ad-sb-overlay-sub",
-        events: {
-          Custom: ["Event"]
-        }
-      }));
-    } catch {}
-  };
-
-  ws.onmessage = (ev) => {
-    let msg = null;
-    try {
-      msg = JSON.parse(String(ev.data || ""));
-    } catch {
-      return;
-    }
-
-    const eventSource = String(msg?.event?.source || "");
-    const eventType = String(msg?.event?.type || "");
-    const isCustomEvent = eventSource === "Custom" && eventType === "Event";
-    if (!isCustomEvent && !looksLikeOverlayPayload(msg?.data) && !looksLikeOverlayPayload(msg?.data?.args)) return;
-
-    const data = msg?.data;
-    const eventName = String(
-      data?.eventName ||
-      data?.name ||
-      msg?.event?.name ||
-      ""
-    ).trim().toUpperCase();
-    const hasNamedOverlayEvent = eventName === "AD_SB_OVERLAY_UPDATE";
-    const hasDirectOverlayPayload =
-      looksLikeOverlayPayload(data?.payload) ||
-      looksLikeOverlayPayload(data?.args?.payload) ||
-      looksLikeOverlayPayload(data?.args) ||
-      looksLikeOverlayPayload(data);
-    if (!hasNamedOverlayEvent && !hasDirectOverlayPayload) return;
-
-    if (data?.payload && typeof data.payload === "object") {
-      applyData(data.payload);
-      return;
-    }
-    const payloadFromJson = tryParseJsonObject(data?.payloadJson);
-    if (payloadFromJson && looksLikeOverlayPayload(payloadFromJson)) {
-      applyData(payloadFromJson);
-      return;
-    }
-    const argsPayloadFromJson = tryParseJsonObject(data?.args?.payloadJson);
-    if (argsPayloadFromJson && looksLikeOverlayPayload(argsPayloadFromJson)) {
-      applyData(argsPayloadFromJson);
-      return;
-    }
-    if (data?.args && typeof data.args === "object") {
-      applyData(data.args);
-      return;
-    }
-    if (data && typeof data === "object") {
-      applyData(data);
-    }
-  };
-
-  ws.onclose = () => {
-    setConnectionBadge("disconnected", "SB Disconnected");
-    setTimeout(connectStreamerbotOverlayFeed, 1500);
-  };
-
-  ws.onerror = () => {
-    setConnectionBadge("disconnected", "SB Disconnected");
-  };
-}
-
 function connectExtensionOverlayFeed() {
   if (typeof chrome === "undefined" || !chrome.runtime?.connect) return;
 
@@ -278,6 +141,7 @@ function connectExtensionOverlayFeed() {
     return;
   }
   if (!port) return;
+  setConnectionBadge("connected", "Extension Connected");
 
   port.onMessage.addListener((msg) => {
     if (!msg || msg.type !== "AD_SB_OVERLAY_UPDATE" || typeof msg.payload !== "object") return;
@@ -285,6 +149,7 @@ function connectExtensionOverlayFeed() {
   });
 
   port.onDisconnect.addListener(() => {
+    setConnectionBadge("disconnected", "Extension Disconnected");
     setTimeout(connectExtensionOverlayFeed, 1200);
   });
 
@@ -300,7 +165,6 @@ function connectExtensionOverlayFeed() {
 
 applyData(parseFromUrl());
 connectExtensionOverlayFeed();
-connectStreamerbotOverlayFeed();
 window.addEventListener("resize", () => {
   fitName("leftName");
   fitName("rightName");
