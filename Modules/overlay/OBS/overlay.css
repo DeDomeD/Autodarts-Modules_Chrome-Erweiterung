@@ -1,266 +1,642 @@
+/**
+ * PDC: Namenszeile oben, darunter Dumbbell (Kreise + Mitte) — Kreise liegen unter den Namen.
+ */
 :root {
-  --bg-main: rgba(17, 22, 39, 0.96);
-  --bg-main-2: rgba(19, 25, 46, 0.96);
-  --stroke: rgba(255, 255, 255, 0.1);
-  --txt: #f5f7ff;
-  --muted: rgba(245, 247, 255, 0.72);
-  --ring-red: #ff1245;
-  --split-gap: 24px;
+  --pdc-navy-solid: #1e2b58;
+  --pdc-navy-deep: #1a1b41;
+  --pdc-orange-bar: linear-gradient(90deg, #ff6b00 0%, #ff8500 55%, #ff9a1a 100%);
+  --pdc-red-bar: linear-gradient(180deg, #e11b22 0%, #b01018 100%);
+  --pdc-navy-muted: linear-gradient(180deg, #2d3550 0%, #222a42 100%);
+  --pdc-stats-bg: transparent;
+  --pdc-txt: #ffffff;
+  --pdc-muted: rgba(255, 255, 255, 0.58);
+  --pdc-ring-glow1: rgba(211, 47, 47, 0.42);
+  --pdc-ring-glow2: rgba(255, 120, 100, 0.2);
+  --pdc-footer-bg: #14182a;
+  /* Sanduhr: 520u ≈ 186mm → 3mm Rand ≈ 8.387u; Taillen-Einzug Ziel ~5mm (sanft) */
+  --pdc-sand-stroke-u: 8.387;
+  /* Aus Screen-Recording (PDC-TV): weiche Zug-Wechsel, kurze Score-Impulse */
+  --pdc-ease-tv: cubic-bezier(0.22, 1, 0.36, 1);
+  --pdc-dur-turn: 380ms;
+  --pdc-dur-soft: 280ms;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
-html, body {
+html,
+body {
   margin: 0;
   width: 100%;
-  height: 100%;
+  min-height: 100%;
   background: transparent;
-  color: var(--txt);
-  font-family: "Arial Black", "Segoe UI", Arial, sans-serif;
+  color: var(--pdc-txt);
+  font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.hidden {
+  display: none !important;
 }
 
 .overlayWrap {
+  min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
-}
-
-.overlayCard {
-  width: 500px;
-  border-radius: 16px;
-  overflow: visible;
-}
-
-.topRow {
-  margin: 0 50px;
-  display: flex;
-  gap: var(--split-gap);
-}
-
-.nameSide {
-  position: relative;
-  flex: 1 1 0;
-  min-height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 16px 16px 0 0;
+  padding: 16px;
 }
 
-.nameSide.left {
-  background: linear-gradient(180deg, #ff1f4e 0%, #f10538 100%);
-  padding-right: 8px;
-  transform: translateX(2px);
+.overlayWrap--br {
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 2vh 2vw;
 }
 
-.nameSide.right {
-  background: linear-gradient(180deg, #394159 0%, #2d344a 100%);
-  padding-left: 8px;
-  transform: translateX(-2px);
+.pdcCard {
+  --nm-left: linear-gradient(180deg, #243060 0%, var(--pdc-navy-solid) 100%);
+  --nm-right: var(--pdc-orange-bar);
+  width: min(600px, 96vw);
+  border-radius: 20px;
+  overflow: visible;
+  filter:
+    drop-shadow(0 4px 6px rgba(0, 0, 0, 0.18)) drop-shadow(0 14px 32px rgba(0, 0, 0, 0.38));
 }
 
-.nameText {
+/* klassisch rot rechts (ältere Skizze) */
+#liveOverlay[data-name-scheme="blueRed"] {
+  --nm-right: var(--pdc-red-bar);
+}
+
+/* Dobey: rot links */
+#liveOverlay[data-name-scheme="redBlue"] {
+  --nm-left: var(--pdc-red-bar);
+  --nm-right: linear-gradient(180deg, #2a3a62 0%, #1e2b58 100%);
+}
+
+.pdcMainRow {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0;
+}
+
+/* Namen + Sanduhr: Layout-Container, kein eigener Hintergrund-Kasten */
+.pdcStage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 10px 0;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+.pdcNameRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  /* Ungefähr Breite der Brücke zwischen den Kreisen (2× Ring ~124px + Grid-Lücken) */
+  max-width: max(200px, min(100%, calc(100% - 276px)));
+  min-height: 46px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 6px 6px 0;
+  position: relative;
+  z-index: 3;
+  background: transparent;
+}
+
+/* Spieler-Karten hinter den Namen */
+.pdcNameCard {
+  border-radius: 14px 14px 6px 6px;
+  padding: 3px;
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.04) 40%,
+    rgba(0, 0, 0, 0.25) 100%
+  );
+  box-shadow:
+    0 6px 22px rgba(0, 0, 0, 0.42),
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 -1px 0 rgba(0, 0, 0, 0.35) inset;
+  transform: scale(1);
+  transition:
+    box-shadow var(--pdc-dur-turn) var(--pdc-ease-tv),
+    transform var(--pdc-dur-turn) var(--pdc-ease-tv);
+}
+
+.pdcNameCard--left {
+  margin-right: 0;
+}
+
+.pdcNameCard--right {
+  margin-left: 0;
+}
+
+.pdcName {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 6px 8px 7px;
+  border-radius: 11px 11px 4px 4px;
+  background: var(--nm-left);
+  transition: background var(--pdc-dur-turn) var(--pdc-ease-tv), filter var(--pdc-dur-soft) ease;
+}
+
+.pdcName--right {
+  background: var(--nm-right);
+}
+
+.pdcNameStack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+
+.pdcNameText {
   width: 100%;
   text-align: center;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: 0.2px;
-  font-weight: 900;
+  font-size: 18px;
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: clip;
+  text-overflow: ellipsis;
 }
 
-.middleRow {
-  margin-top: 0;
-  height: 156px;
+.pdcFlag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 16px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.pdcFlag.hidden {
+  display: none;
+}
+
+.pdcFlagImg {
+  width: 26px;
+  height: 17px;
+  object-fit: cover;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+/* Wurf-Hervorhebung */
+#liveOverlay.pdcCard--followTurn .pdcNameCard:not(.pdcNameCard--throwing) .pdcName {
+  background: var(--pdc-navy-muted);
+}
+
+#liveOverlay.pdcCard--followTurn .pdcNameCard--throwing .pdcName {
+  background: var(--pdc-orange-bar);
+}
+
+#liveOverlay[data-name-scheme="blueRed"].pdcCard--followTurn .pdcNameCard--throwing .pdcName {
+  background: var(--pdc-red-bar);
+}
+
+#liveOverlay.pdcCard--followTurn .pdcNameCard--throwing {
+  transform: scale(1.012);
+}
+
+/*
+  Sanduhr-SVG; liegt über transparentem Stage-Container.
+*/
+.pdcBottomBand {
   position: relative;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: none;
-  border-radius: 0;
   z-index: 1;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+  border-radius: 0;
+  overflow: visible;
+  /* Proportion wie SVG viewBox (520×148) */
+  aspect-ratio: 520 / 148;
+  min-height: 124px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
 }
 
-.middleRow::before {
-  content: "";
+.pdcHourglassSvg {
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
-  width: calc(50% - (var(--split-gap) / 2));
-  border: 1px solid var(--stroke);
-  border-top: none;
-  border-radius: 28px 0 24px 24px;
-  background:
-    radial-gradient(130% 100% at 50% 120%, rgba(16, 22, 41, 0.95), rgba(16, 22, 41, 0.98)),
-    linear-gradient(180deg, var(--bg-main), var(--bg-main-2));
-  z-index: 1;
-}
-
-.middleRow::after {
-  content: "";
-  position: absolute;
   right: 0;
   top: 0;
   bottom: 0;
-  width: calc(50% - (var(--split-gap) / 2));
-  border: 1px solid var(--stroke);
-  border-top: none;
-  border-radius: 0 28px 24px 24px;
-  background:
-    radial-gradient(130% 100% at 50% 120%, rgba(16, 22, 41, 0.95), rgba(16, 22, 41, 0.98)),
-    linear-gradient(180deg, var(--bg-main), var(--bg-main-2));
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.35));
+}
+
+.pdcHourglassPath {
+  shape-rendering: geometricPrecision;
+  /* Grauer Rand ~3mm: Strich zuerst, Fill überdeckt innere Hälfte → Rand nach außen */
+  stroke: #5c6478;
+  stroke-width: var(--pdc-sand-stroke-u);
+  paint-order: stroke fill;
+}
+
+/* Eine Zeile: [ Kreis | Mitte | Kreis ] */
+.pdcDumbbellRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  align-items: center;
+  justify-items: center;
+  gap: 4px 6px;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 6px 0 8px;
   z-index: 1;
 }
 
-.scoreRing {
-  position: absolute;
-  top: 7px;
-  width: 144px;
-  height: 144px;
-  border-radius: 50%;
-  background: var(--ring-red);
-  display: grid;
-  place-items: center;
-  box-shadow: 0 0 0 5px rgba(255, 18, 69, 0.18);
-  z-index: 5;
-}
-
-.scoreRing.left { left: -8px; }
-.scoreRing.right { right: -8px; }
-
-.scoreInner {
-  width: 118px;
-  height: 118px;
-  border-radius: 50%;
-  background: linear-gradient(180deg, #1a223d, #121a31);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  display: grid;
-  place-items: center;
-}
-
-.scoreValue {
-  font-size: 48px;
-  line-height: 1;
-  font-weight: 900;
-  color: #fff;
-}
-
-.centerStats {
+.pdcStatsFill {
   position: relative;
   z-index: 2;
-  text-align: center;
-  width: 200px;
-  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 4px;
 }
 
-.setCorner {
-  position: absolute;
-  top: 3px;
-  min-width: 24px;
-  text-align: center;
-  z-index: 4;
-  font-size: 24px;
-  line-height: 1;
-  font-weight: 900;
-  color: #f5f7ff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+.pdcPod {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.setCorner.left { right: calc(50% + 50px); }
-.setCorner.right { left: calc(50% + 50px); }
+.pdcPod--left {
+  justify-self: start;
+  margin-left: 2px;
+}
 
-.sideBoard {
+.pdcPod--right {
+  justify-self: end;
+  margin-right: 2px;
+}
+
+.pdcPod .pdcRingGlow {
+  pointer-events: auto;
+}
+
+.pdcRingGlow {
+  position: relative;
+  filter: drop-shadow(0 0 8px var(--pdc-ring-glow1)) drop-shadow(0 0 14px var(--pdc-ring-glow2));
+  transition: filter var(--pdc-dur-turn) var(--pdc-ease-tv);
+  will-change: filter;
+}
+
+.pdcRingGlow--right {
+  filter: drop-shadow(0 0 8px rgba(211, 47, 47, 0.42)) drop-shadow(0 0 14px rgba(255, 100, 80, 0.22));
+}
+
+@keyframes pdcRingTurnPop {
+  0% {
+    transform: scale(1);
+  }
+  38% {
+    transform: scale(1.045);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Kurzer „Aufschlag“ wie TV bei Zugwechsel (unabhängig von linkem/rechtem Glow) */
+.pdcRingGlow--tick .pdcRing {
+  animation: pdcRingTurnPop 0.48s var(--pdc-ease-tv) 1;
+  transform-origin: center center;
+}
+
+.pdcRing {
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  padding: 4px;
+  background: linear-gradient(165deg, #ef5350 0%, #d32f2f 42%, #b71c1c 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  position: relative;
+  z-index: 1;
+  transition: box-shadow var(--pdc-dur-soft) var(--pdc-ease-tv);
+}
+
+/* Dünner heller Innensaum (Broadcast-Ring, kein Regenbogen-Conic) */
+.pdcRing::before {
+  content: "";
   position: absolute;
-  top: 30px;
-  width: 92px;
-  height: 112px;
-  border: 1px solid rgba(227, 235, 255, 0.55);
-  border-radius: 10px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  overflow: hidden;
-  background: linear-gradient(
-    180deg,
-    rgba(81, 110, 165, 0.22),
-    rgba(56, 82, 133, 0.16)
-  );
-  box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.22);
+  inset: 5px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 200, 190, 0.32);
+  pointer-events: none;
   z-index: 2;
 }
 
-.sideBoard.left { left: 142px; }
-.sideBoard.right { right: 142px; }
+/* TV: leuchtender Bogen oben am Ring (nicht unten) */
+.pdcRingArc {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  bottom: auto;
+  width: 62%;
+  max-width: 78px;
+  height: 5px;
+  transform: translateX(-50%);
+  border-radius: 6px 6px 0 0;
+  background: linear-gradient(
+    90deg,
+    rgba(230, 0, 40, 0.15),
+    #ff3358 45%,
+    #ff5e7a 50%,
+    #ff3358 55%,
+    rgba(230, 0, 40, 0.15)
+  );
+  box-shadow: 0 0 12px rgba(255, 50, 90, 0.55);
+  opacity: 0;
+  z-index: 4;
+  transition: opacity var(--pdc-dur-turn) var(--pdc-ease-tv);
+  pointer-events: none;
+}
 
-.sideBoard::before {
+
+.pdcRingGlow.isTurn .pdcRingArc {
+  opacity: 0.92;
+}
+
+.pdcRingInner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse 90% 75% at 50% 38%, rgba(255, 255, 255, 0.07) 0%, transparent 52%),
+    linear-gradient(185deg, #252a3e 0%, #12151c 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+
+/* Großer Pfeil im Hintergrund nur bei Zug (ringGlow.isTurn); heller als Fläche, Score darüber */
+.pdcTurnBg {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 76%;
+  height: 76%;
+  max-width: 94px;
+  max-height: 94px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 0;
+  color: rgba(255, 255, 255, 0.13);
+  opacity: 0;
+  transition: opacity var(--pdc-dur-turn) var(--pdc-ease-tv);
+}
+
+.pdcRingGlow.isTurn .pdcTurnBg {
+  opacity: 1;
+}
+
+.pdcTurnBg--mirror .pdcTurnArrow {
+  transform: scaleX(-1);
+}
+
+.pdcTurnArrow {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pdcScoreVal {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(32px, 7vw, 44px);
+  line-height: 1;
+  font-weight: 900;
+  font-style: italic;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  transform-origin: center center;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.85),
+    0 0 1px rgba(0, 0, 0, 0.9);
+}
+
+@keyframes pdcScoreTick {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  40% {
+    transform: scale(1.06);
+    filter: brightness(1.12);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+.pdcScoreVal.pdcScoreVal--tick {
+  animation: pdcScoreTick 0.4s var(--pdc-ease-tv) 1;
+}
+
+.pdcCenter {
+  text-align: center;
+  width: 100%;
+  max-width: 200px;
+}
+
+.pdcLine {
+  color: var(--pdc-txt);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.pdcLine--format {
+  font-size: 11px;
+  margin-bottom: 7px;
+  color: var(--pdc-muted);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.pdcLine--sets,
+.pdcLine--legs {
+  font-size: 18px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.pdcLine--legs {
+  margin-bottom: 0;
+}
+
+.pdcLbl {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: var(--pdc-muted);
+  padding-bottom: 2px;
+}
+
+.pdcNum {
+  min-width: 1.15em;
+  font-variant-numeric: tabular-nums;
+  position: relative;
+  padding-bottom: 4px;
+}
+
+.pdcNum.isActiveTurn::after {
   content: "";
   position: absolute;
   left: 50%;
-  top: 0;
   bottom: 0;
-  width: 1px;
-  background: rgba(227, 235, 255, 0.65);
   transform: translateX(-50%);
+  width: 72%;
+  max-width: 26px;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ff2a6d, #ff8099);
+  box-shadow: 0 0 10px rgba(255, 45, 110, 0.65);
+  transition:
+    opacity var(--pdc-dur-turn) var(--pdc-ease-tv),
+    transform var(--pdc-dur-turn) var(--pdc-ease-tv);
 }
 
-.sideBoard::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 30px;
-  height: 1px;
-  background: rgba(227, 235, 255, 0.6);
-  transform: rotate(-24deg);
-  transform-origin: left center;
+/* Dart-„Bubbles“: zur Anzeige hin spitz (Chevron), TV-PDC-Stil */
+.pdcCheckout {
+  --bubble-navy: rgba(26, 31, 44, 0.92);
+  --bubble-edge: rgba(255, 255, 255, 0.1);
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 4px 8px 8px;
+  margin-top: 46px;
+  z-index: 5;
 }
 
-.boardCol {
+.pdcCheckout--right {
+  padding-left: 2px;
+  padding-right: 6px;
+}
+
+.pdcCheckout--left {
+  order: -1;
+  padding-right: 2px;
+  padding-left: 8px;
+}
+
+.pdcDartBubble {
+  position: relative;
+  min-width: 56px;
+  min-height: 36px;
+  padding: 0 12px 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  transition: opacity var(--pdc-dur-soft) ease, transform var(--pdc-dur-soft) var(--pdc-ease-tv);
+  /* Spitze zeigt zur Mitte (links bei --right, rechts bei --left) */
+  clip-path: polygon(12px 0%, 100% 0%, 100% 100%, 12px 100%, 0% 50%);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.03) 28%,
+    transparent 50%
+  ),
+    linear-gradient(180deg, #232a38 0%, var(--bubble-navy) 45%, #12151c 100%);
+  border: 1px solid var(--bubble-edge);
+  border-left: none;
+  box-shadow:
+    2px 3px 8px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
+}
+
+.pdcCheckout--left .pdcDartBubble {
+  padding: 0 18px 0 12px;
+  clip-path: polygon(0% 0%, calc(100% - 12px) 0%, 100% 50%, calc(100% - 12px) 100%, 0% 100%);
+  border: 1px solid var(--bubble-edge);
+  border-right: none;
+  box-shadow:
+    -2px 3px 8px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.pdcDartBubble.hidden {
+  display: none;
+}
+
+.pdcDartBubbleTxt {
   position: relative;
   z-index: 1;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 5px;
-  font-family: "Segoe UI", Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Footer: eigene Zeile unter Sanduhr/Kreisen, volle Kartenbreite */
+.pdcFooter {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0 0;
+  background: var(--pdc-footer-bg);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 10px;
   font-weight: 700;
-  color: rgba(241, 246, 255, 0.92);
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: 10px 14px 12px;
+  border-radius: 0 0 14px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.boardCol.right {
-  font-weight: 800;
-}
-
-.leftCheckout,
-.rightCheckout {
-  position: absolute;
-  top: 20px;
-  z-index: 3;
-  display: grid;
-  gap: 6px;
-}
-
-.leftCheckout { left: -78px; }
-.rightCheckout { right: -78px; }
-
-.checkoutBox {
-  min-width: 66px;
-  min-height: 32px;
-  padding: 0 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(54, 62, 88, 0.95), rgba(35, 41, 60, 0.96));
-  color: #f4f7ff;
-  display: grid;
-  place-items: center;
-  font-size: 17px;
-  line-height: 1;
-  font-weight: 900;
+.pdcFooter:empty {
+  display: none;
 }
 
 .connBadge {
@@ -296,158 +672,223 @@ html, body {
   visibility: hidden;
 }
 
-.hidden {
-  display: none !important;
+/*
+  PDC TV (2025/26 Sendepaket): Petrol/Teal, dunkle Graphit-Flächen, „Wheel“-Ringe.
+  Kein 1:1-Pixel mit geschützten Sender-Assets möglich — Layout/Farben am On-Air-Look orientiert.
+*/
+#liveOverlay[data-name-scheme="pdcOfficial"] {
+  /* Slider: Farbton (0–360) + Intensität 0–1 (--pdc-glow-k), gesetzt in overlay.js */
+  --pdc-glow-h: 172;
+  --pdc-glow-k: 1;
+  --pdc-ring-glow1: hsla(var(--pdc-glow-h), 70%, 52%, calc(0.48 * var(--pdc-glow-k)));
+  --pdc-ring-glow2: hsla(calc(var(--pdc-glow-h) + 5), 62%, 40%, calc(0.22 * var(--pdc-glow-k)));
+  --pdc-footer-bg: #0a0c10;
+  /* Sanduhr: etwas feinerer Rand (näher TV) */
+  --pdc-sand-stroke-u: 7.25;
 }
 
-.calWrap {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  color: #f5f7ff;
-  font-family: "Segoe UI", Arial, sans-serif;
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcNameCard {
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.08) 0%, rgba(0, 0, 0, 0.12) 100%);
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  /* Äußerer Glow (clip-path am Kind würde box-shadow abschneiden) */
+  filter:
+    drop-shadow(0 0 12px hsla(var(--pdc-glow-h), 70%, 52%, calc(0.32 * var(--pdc-glow-k))))
+    drop-shadow(0 0 26px hsla(var(--pdc-glow-h), 65%, 48%, calc(0.14 * var(--pdc-glow-k))));
 }
 
-.calCanvas {
-  position: absolute;
-  inset: 0;
-  cursor: crosshair;
-  overflow: hidden;
+/* Facettierte „scharfe“ Ecken statt weicher Pillen; nur Inset-Licht am Namen */
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcName {
+  border-radius: 0;
+  clip-path: polygon(
+    10px 0%,
+    calc(100% - 10px) 0%,
+    100% 10px,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    10px 100%,
+    0% calc(100% - 10px),
+    0% 10px
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+}
+
+/* Ohne Follow-Turn: links neutral, rechts Petrol-Akzent (wie typische Wide-Shots) */
+#liveOverlay[data-name-scheme="pdcOfficial"]:not(.pdcCard--followTurn) .pdcName--left {
+  background: linear-gradient(175deg, #343a46 0%, #23272f 100%);
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"]:not(.pdcCard--followTurn) .pdcName--right {
+  background: linear-gradient(92deg, #2dd4bf 0%, #14b8a6 45%, #1e2830 100%);
+}
+
+/* Follow-Turn: am Zug = volles Petrol, Gegner = Graphit */
+#liveOverlay[data-name-scheme="pdcOfficial"].pdcCard--followTurn .pdcNameCard:not(.pdcNameCard--throwing) .pdcName {
+  background: linear-gradient(175deg, #383e4a 0%, #252a32 100%);
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"].pdcCard--followTurn .pdcNameCard--throwing .pdcName {
+  background: linear-gradient(95deg, #5eead4 0%, #14b8a6 35%, #0f766e 72%, #1c252d 100%);
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"].pdcCard--followTurn .pdcNameCard--throwing {
+  transform: scale(1.008);
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcBottomBand {
+  background: transparent;
+}
+
+/* Flaches Fill würde den SVG-Verlauf töten — Referenz: voluminöses Graphit + Petrol-Kante */
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcHourglassSvg {
+  filter:
+    drop-shadow(0 -2px 18px hsla(var(--pdc-glow-h), 65%, 50%, calc(0.22 * var(--pdc-glow-k))))
+    drop-shadow(0 0 28px hsla(var(--pdc-glow-h), 70%, 52%, calc(0.1 * var(--pdc-glow-k))))
+    drop-shadow(0 3px 0 rgba(0, 0, 0, 0.22))
+    drop-shadow(0 14px 36px rgba(0, 0, 0, 0.52));
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcHourglassPath {
+  fill: url(#pdcHgGrad);
+  stroke: url(#pdcSandStrokeGrad);
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcRingGlow,
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcRingGlow--right {
+  filter:
+    drop-shadow(0 0 8px hsla(var(--pdc-glow-h), 78%, 64%, calc(0.55 * var(--pdc-glow-k))))
+    drop-shadow(0 0 18px var(--pdc-ring-glow1))
+    drop-shadow(0 0 32px var(--pdc-ring-glow2))
+    drop-shadow(0 0 48px hsla(calc(var(--pdc-glow-h) + 3), 62%, 38%, calc(0.12 * var(--pdc-glow-k))));
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcRing {
+  padding: 3px;
+  background: conic-gradient(
+    from 210deg,
+    #0f766e 0deg,
+    #14b8a6 70deg,
+    #5eead4 140deg,
+    #0d9488 220deg,
+    #115e59 300deg,
+    #0f766e 360deg
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 8px rgba(0, 30, 40, 0.35),
+    0 0 14px hsla(var(--pdc-glow-h), 78%, 64%, calc(0.45 * var(--pdc-glow-k))),
+    0 0 28px hsla(var(--pdc-glow-h), 70%, 52%, calc(0.3 * var(--pdc-glow-k))),
+    0 0 42px hsla(calc(var(--pdc-glow-h) + 5), 62%, 40%, calc(0.15 * var(--pdc-glow-k)));
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcRing::before {
+  border-color: rgba(200, 255, 245, 0.22);
+}
+
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcRingInner {
   background:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 48px 48px;
+    radial-gradient(
+      ellipse 95% 80% at 50% 32%,
+      hsla(var(--pdc-glow-h), 70%, 52%, calc(0.09 * var(--pdc-glow-k))) 0%,
+      transparent 55%
+    ),
+    linear-gradient(188deg, #1e2433 0%, #0f1218 100%);
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 3px 18px rgba(0, 0, 0, 0.45);
 }
 
-.calBgImg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background: rgba(0, 0, 0, 0.2);
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcTurnBg {
+  color: hsla(var(--pdc-glow-h), 75%, 78%, calc(0.13 * var(--pdc-glow-k)));
 }
 
-.calMarkerLayer {
-  position: absolute;
-  inset: 0;
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcRingArc {
+  height: 6px;
+  border-radius: 0;
+  background: linear-gradient(
+    90deg,
+    hsla(var(--pdc-glow-h), 48%, 28%, calc(0.15 * var(--pdc-glow-k))),
+    hsla(var(--pdc-glow-h), 75%, 72%, calc(0.95 * var(--pdc-glow-k))) 38%,
+    hsl(var(--pdc-glow-h), 100%, 97%) 50%,
+    hsla(var(--pdc-glow-h), 75%, 72%, calc(0.95 * var(--pdc-glow-k))) 62%,
+    hsla(var(--pdc-glow-h), 48%, 28%, calc(0.15 * var(--pdc-glow-k)))
+  );
+  /* Enden weich auslaufen (nadelartig zu null) */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+  box-shadow:
+    0 0 10px hsla(var(--pdc-glow-h), 85%, 88%, calc(0.65 * var(--pdc-glow-k))),
+    0 0 22px hsla(var(--pdc-glow-h), 78%, 64%, calc(0.55 * var(--pdc-glow-k))),
+    0 0 36px hsla(var(--pdc-glow-h), 70%, 52%, calc(0.25 * var(--pdc-glow-k)));
 }
 
-.calMarker {
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.92);
-  transform: translate(-50%, -50%);
-  background: rgba(255, 18, 69, 0.92);
-  box-shadow: 0 0 0 4px rgba(255, 18, 69, 0.25);
-  pointer-events: none;
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcNum.isActiveTurn::after {
+  background: linear-gradient(
+    90deg,
+    hsla(var(--pdc-glow-h), 62%, 40%, 1),
+    hsla(var(--pdc-glow-h), 75%, 72%, 1)
+  );
+  box-shadow: 0 0 12px hsla(var(--pdc-glow-h), 70%, 52%, calc(0.55 * var(--pdc-glow-k)));
 }
 
-.calMarkerLabel {
-  position: absolute;
-  transform: translate(-50%, calc(-100% - 10px));
-  font-size: 12px;
-  font-weight: 800;
-  color: #ffffff;
-  background: rgba(8, 12, 26, 0.84);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  padding: 2px 8px;
-  pointer-events: none;
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcLine--format {
+  color: rgba(255, 255, 255, 0.45);
 }
 
-.calPanel {
-  position: absolute;
-  left: 12px;
-  top: 12px;
-  width: min(380px, calc(100% - 24px));
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(10, 15, 29, 0.9);
-  backdrop-filter: blur(4px);
-  padding: 12px;
-  z-index: 2;
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcFooter {
+  background: linear-gradient(180deg, #0e1016 0%, #06070a 100%);
+  border-color: hsla(var(--pdc-glow-h), 60%, 48%, calc(0.12 * var(--pdc-glow-k)));
+  letter-spacing: 0.18em;
 }
 
-.calTitle {
-  font-size: 17px;
-  font-weight: 900;
+#liveOverlay[data-name-scheme="pdcOfficial"] .pdcDartBubble {
+  --bubble-navy: rgba(18, 22, 32, 0.94);
+  --bubble-edge: hsla(var(--pdc-glow-h), 70%, 52%, calc(0.22 * var(--pdc-glow-k)));
+  background: linear-gradient(
+    165deg,
+    hsla(var(--pdc-glow-h), 70%, 52%, calc(0.12 * var(--pdc-glow-k))) 0%,
+    rgba(255, 255, 255, 0.04) 35%,
+    transparent 55%
+  ),
+    linear-gradient(185deg, #1a2430 0%, var(--bubble-navy) 50%, #0c1018 100%);
 }
 
-.calRow {
-  margin-top: 8px;
-  display: grid;
-  gap: 6px;
-}
+@media (max-width: 520px) {
+  .pdcNameRow {
+    max-width: max(160px, min(100%, calc(100% - 228px)));
+    gap: 6px;
+  }
 
-.calRow label {
-  font-size: 12px;
-  color: rgba(245, 247, 255, 0.84);
-}
+  .pdcNameText {
+    font-size: 16px;
+  }
 
-.calInput {
-  width: 100%;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(0, 0, 0, 0.28);
-  color: #f5f7ff;
-  font-family: "Segoe UI", Arial, sans-serif;
-  font-size: 13px;
-  padding: 8px 10px;
-}
+  .pdcDumbbellRow {
+    grid-template-columns: auto minmax(88px, 1fr) auto;
+    gap: 2px;
+  }
 
-.calHint {
-  margin-top: 6px;
-  font-size: 13px;
-  color: rgba(245, 247, 255, 0.8);
-}
+  .pdcRing {
+    width: 102px;
+    height: 102px;
+  }
 
-.calSteps {
-  margin-top: 10px;
-  font-size: 13px;
-  line-height: 1.4;
-}
+  .pdcScoreVal {
+    font-size: 28px;
+  }
 
-.calButtons {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
-}
+  .pdcDartBubble {
+    min-width: 48px;
+    min-height: 30px;
+    font-size: 13px;
+    padding-left: 14px;
+    padding-right: 8px;
+  }
 
-.calButtonsSingle {
-  grid-template-columns: 1fr;
-}
-
-.calBtn {
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.08);
-  color: #f5f7ff;
-  border-radius: 10px;
-  padding: 7px 10px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.calBtnPrimary {
-  background: rgba(34, 178, 99, 0.2);
-  border-color: rgba(34, 178, 99, 0.5);
-}
-
-.calBtnDanger {
-  background: rgba(209, 47, 47, 0.2);
-  border-color: rgba(209, 47, 47, 0.5);
-}
-
-.calFileInput {
-  display: none;
-}
-
-.calImageInfo {
-  margin-top: 8px;
-  font-size: 12px;
-  color: rgba(245, 247, 255, 0.74);
+  .pdcCheckout--left .pdcDartBubble {
+    padding-left: 8px;
+    padding-right: 14px;
+  }
 }

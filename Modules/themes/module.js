@@ -1,4 +1,4 @@
-(function initWebsiteDesignModule(scope) {
+(function initThemesModule(scope) {
   scope.AD_SB_MODULES = scope.AD_SB_MODULES || {};
   let CUSTOM_DROPDOWN_OPEN = false;
   let COMMUNITY_GALLERY_OPEN = false;
@@ -68,6 +68,7 @@
     const themes = getAllThemesForLayout(layout, settings);
     let wanted = String(rawTheme || "").toLowerCase();
     if (wanted === "arena") wanted = "hue";
+    if (wanted === "tools-glass") wanted = "stream-glass";
     if (themes.some((t) => t.id === wanted)) return wanted;
     return themes[0]?.id || "";
   }
@@ -87,6 +88,89 @@
 
   function tr(settings, keyDe, keyEn) {
     return String(settings?.uiLanguage || "de").toLowerCase().startsWith("de") ? keyDe : keyEn;
+  }
+
+  function normalizeBackgroundSize(raw) {
+    const v = String(raw || "cover").toLowerCase();
+    return v === "contain" || v === "auto" ? v : "cover";
+  }
+
+  function prettyThemeBuilderTargetsJson(raw) {
+    try {
+      const v = JSON.parse(String(raw || "[]"));
+      return JSON.stringify(Array.isArray(v) ? v : [], null, 2);
+    } catch {
+      return String(raw || "[]");
+    }
+  }
+
+  function parseThemeBuilderTargetsForSave(raw) {
+    try {
+      const arr = JSON.parse(String(raw || "[]"));
+      if (!Array.isArray(arr)) return { ok: false };
+      const normalized = arr
+        .filter((x) => x && typeof x === "object")
+        .map((x) => ({
+          key: String(x.key || "")
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, "")
+            .slice(0, 48),
+          label: String(x.label || x.key || "").trim().slice(0, 80) || String(x.key || "").trim(),
+          selector: String(x.selector || "").trim()
+        }))
+        .filter((x) => x.key && x.selector);
+      return { ok: true, value: JSON.stringify(normalized) };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  /**
+   * Skaliert große Bilder herunter und speichert als JPEG-Data-URL (Speicher-Limit).
+   * @param {File} file
+   * @returns {Promise<string>}
+   */
+  function compressImageFileToDataUrl(file, maxEdge = 1920, quality = 0.82) {
+    return new Promise((resolve, reject) => {
+      if (!file || !file.type || !String(file.type).startsWith("image/")) {
+        reject(new Error("not_image"));
+        return;
+      }
+      const img = new Image();
+      const objUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        try {
+          let w = img.naturalWidth || img.width;
+          let h = img.naturalHeight || img.height;
+          if (!w || !h) throw new Error("bad_dimensions");
+          const scale = w > maxEdge || h > maxEdge ? Math.min(maxEdge / w, maxEdge / h) : 1;
+          w = Math.max(1, Math.round(w * scale));
+          h = Math.max(1, Math.round(h * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("no_canvas");
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          URL.revokeObjectURL(objUrl);
+          resolve(dataUrl);
+        } catch (e) {
+          try {
+            URL.revokeObjectURL(objUrl);
+          } catch {}
+          reject(e);
+        }
+      };
+      img.onerror = () => {
+        try {
+          URL.revokeObjectURL(objUrl);
+        } catch {}
+        reject(new Error("image_load_failed"));
+      };
+      img.src = objUrl;
+    });
   }
 
   function parseJsonIdList(raw) {
@@ -123,7 +207,14 @@
   }
 
   function getCommunityFavorites(settings) {
-    return parseJsonIdList(settings?.websiteCommunityFavorites);
+    const list = parseJsonIdList(settings?.websiteCommunityFavorites);
+    const mapped = list.map((id) => (id === "tools-glass" ? "stream-glass" : id));
+    const seen = new Set();
+    return mapped.filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
   }
 
   function isCommunityThemeActive(theme, settings) {
@@ -166,7 +257,7 @@
   function getThemeScreenshotSrc(theme) {
     const id = String(theme?.id || "").trim().toLowerCase();
     if (!id) return "";
-    return `../Modules/websitedesign/assets/${id}.png`;
+    return `../Modules/themes/assets/${id}.png`;
   }
 
   function bindCommunityPreviewImageFallbacks(root) {
@@ -427,6 +518,25 @@
     bindCommunityPreviewImageFallbacks(root);
     if (primaryVal) primaryVal.textContent = `${primaryHue}°`;
     if (secondaryVal) secondaryVal.textContent = `${secondaryHue}°`;
+
+    const bgData = String(settings?.websiteBackgroundImageData || "").trim();
+    const bgSize = normalizeBackgroundSize(settings?.websiteBackgroundSize);
+    const bgSel = root.querySelector("#websiteBackgroundSize");
+    if (bgSel) bgSel.value = bgSize;
+    const wrap = root.querySelector("#websiteBackgroundPreviewWrap");
+    const prev = root.querySelector("#websiteBackgroundPreview");
+    if (wrap && prev) {
+      if (bgData) {
+        prev.src = bgData.startsWith("data:") ? bgData : `data:image/jpeg;base64,${bgData}`;
+        wrap.style.display = "";
+      } else {
+        prev.removeAttribute("src");
+        wrap.style.display = "none";
+      }
+    }
+
+    const taTargets = root.querySelector("#websiteThemeBuilderTargets");
+    if (taTargets) taTargets.value = prettyThemeBuilderTargetsJson(settings?.websiteThemeBuilderTargets);
   }
 
   async function applyCommunityTheme(api, settings, themeId) {
@@ -438,14 +548,14 @@
     });
   }
 
-  scope.AD_SB_MODULES.websitedesign = {
-    id: "websitedesign",
+  scope.AD_SB_MODULES.themes = {
+    id: "themes",
     icon: "D",
-    navLabelKey: "nav_websitedesign",
+    navLabelKey: "nav_themes",
     needs: { streamerbot: false, obs: false },
     render() {
       return `
-        <h2 class="title"><span data-i18n="title_websitedesign">Website Design</span><span class="titleMeta">Autodarts Web</span></h2>
+        <h2 class="title"><span data-i18n="title_themes">Themes</span><span class="titleMeta">Autodarts</span></h2>
         <div class="card">
           <div class="formRow">
             <label class="label">Layout</label>
@@ -458,6 +568,24 @@
             <label class="label">Theme</label>
             <div id="websiteThemeButtons" class="choiceGrid"></div>
             <div class="hint">Themes werden nach Layout gefiltert und direkt gespeichert.</div>
+          </div>
+
+          <div class="formRow">
+            <label class="label" data-i18n="website_bg_title">Hintergrundbild</label>
+            <div class="hint" data-i18n="website_bg_hint">Eigenes Bild hinter dem Theme auf play.autodarts.io (wird für die Speicherung verkleinert).</div>
+            <input type="file" id="websiteBackgroundFile" accept="image/*" hidden />
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">
+              <button type="button" class="btnMini" id="websiteBackgroundPickBtn" data-i18n="website_bg_pick">Bild wählen …</button>
+              <button type="button" class="btnMini" id="websiteBackgroundClearBtn" data-i18n="website_bg_remove">Entfernen</button>
+              <select id="websiteBackgroundSize" class="input" style="max-width:160px;" title="Darstellung">
+                <option value="cover">Cover</option>
+                <option value="contain">Contain</option>
+                <option value="auto">Auto</option>
+              </select>
+            </div>
+            <div id="websiteBackgroundPreviewWrap" class="hint" style="margin-top:8px;display:none;">
+              <img id="websiteBackgroundPreview" alt="" style="max-width:100%;max-height:120px;border-radius:8px;border:1px solid rgba(127,127,127,.35);" />
+            </div>
           </div>
 
           <div class="formRow">
@@ -505,6 +633,9 @@
           <div class="formRow">
             <button id="startThemeBuilderBtn" class="btnPrimary" type="button">Theme Builder (WIP) starten</button>
             <div class="hint">Work in Progress. Startet den Builder direkt auf der Website. Popup wird geschlossen.</div>
+            <label class="label" for="websiteThemeBuilderTargets" style="margin-top:10px;">Zusätzliche Builder-Ziele (JSON)</label>
+            <div class="hint">Optional: eigene Elemente per CSS-Selektor (z. B. aus DevTools). Format: <code>[{&quot;key&quot;:&quot;mein-block&quot;,&quot;label&quot;:&quot;Block&quot;,&quot;selector&quot;:&quot;#app header&quot;}]</code>. key nur a-z, 0-9, Bindestrich. Verschieben: Ziehen. Größe: Ecke unten rechts (immer proportional). Drehen: orangener Griff. Auf der Seite: Kurztipps unten links (3D: Alt+Pfeiltasten).</div>
+            <textarea id="websiteThemeBuilderTargets" class="input" rows="5" spellcheck="false" style="width:100%;font-family:ui-monospace,monospace;font-size:11px;margin-top:6px;" placeholder='[]'></textarea>
           </div>
 
           <div class="list" style="margin-top:14px;">
@@ -547,6 +678,20 @@
         if (out) out.textContent = `${v}°`;
       });
 
+      root.querySelector("#websiteThemeBuilderTargets")?.addEventListener("blur", async (ev) => {
+        const ta = ev.target;
+        if (!ta || ta.id !== "websiteThemeBuilderTargets") return;
+        const settings = api.getSettings?.() || {};
+        const parsed = parseThemeBuilderTargetsForSave(ta.value);
+        if (!parsed.ok) {
+          window.alert(tr(settings, "Ungültiges JSON im Feld Zusätzliche Builder-Ziele.", "Invalid JSON in extra builder targets."));
+          ta.value = prettyThemeBuilderTargetsJson(settings.websiteThemeBuilderTargets);
+          return;
+        }
+        await api.savePartial({ websiteThemeBuilderTargets: parsed.value });
+        ta.value = prettyThemeBuilderTargetsJson(parsed.value);
+      });
+
       root.querySelector("#startThemeBuilderBtn")?.addEventListener("click", async () => {
         try {
           if (chrome?.tabs?.query && chrome?.tabs?.sendMessage) {
@@ -567,6 +712,36 @@
         try { window.close(); } catch {}
       });
 
+      root.querySelector("#websiteBackgroundPickBtn")?.addEventListener("click", () => {
+        root.querySelector("#websiteBackgroundFile")?.click();
+      });
+      root.querySelector("#websiteBackgroundFile")?.addEventListener("change", async (ev) => {
+        const input = ev.target;
+        const file = input?.files?.[0];
+        if (input) input.value = "";
+        if (!file) return;
+        const settings = api.getSettings?.() || {};
+        if (file.size > 18 * 1024 * 1024) {
+          window.alert(tr(settings, "Datei zu groß (max. ca. 18 MB).", "File too large (max ~18 MB)."));
+          return;
+        }
+        try {
+          const dataUrl = await compressImageFileToDataUrl(file);
+          await api.savePartial({ websiteBackgroundImageData: dataUrl });
+          paint(root, api.getSettings?.() || {});
+        } catch {
+          window.alert(tr(settings, "Bild konnte nicht gelesen werden.", "Could not read image."));
+        }
+      });
+      root.querySelector("#websiteBackgroundClearBtn")?.addEventListener("click", async () => {
+        await api.savePartial({ websiteBackgroundImageData: "" });
+        paint(root, api.getSettings?.() || {});
+      });
+      root.querySelector("#websiteBackgroundSize")?.addEventListener("change", async (ev) => {
+        const v = normalizeBackgroundSize(ev.target?.value);
+        await api.savePartial({ websiteBackgroundSize: v });
+      });
+
       root.querySelector("#openCommunityThemeGallery")?.addEventListener("click", () => {
         COMMUNITY_GALLERY_OPEN = true;
         paint(root, api.getSettings?.() || {});
@@ -579,7 +754,9 @@
           websiteThemeBuilderEnabled: false,
           websiteThemeBuilderData: "{}",
           websiteTheme: "classic",
-          websiteLayout: "horizontal"
+          websiteLayout: "horizontal",
+          websiteBackgroundImageData: "",
+          websiteBackgroundSize: "cover"
         });
       });
 

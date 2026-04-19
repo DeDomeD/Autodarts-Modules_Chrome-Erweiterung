@@ -1,14 +1,15 @@
 /**
  * Content Bridge (Autodarts Seite -> Extension)
- * Verantwortung:
- * - injiziert `Main/bridge/pageScript.js` auf Match-Seiten
- * - leitet normalisierte Events ans Background-Script weiter
- * - erkennt Undo-Klicks als UI-Event fuer Korrektur-Trigger
+ * - injiziert `Main/bridge/pageScript.js` (PAGE world: WS-Capture + DOM/Fetch-Bridge)
+ * - leitet `postMessage` (__AD_SB__) ans Background-Script weiter
+ * - erkennt Undo-/Korrektur-Klicks als UI-Events
  */
-console.log("[Autodarts Modules] bridge/content.js loaded");
 
 let pageScriptInjected = false;
-let lastKnownHref = String(location.href || "");
+/** `null` bis erste Messung — dann sofort ein Navigation-Event mit echtem Pfad (Worker: Game-ON-URL-Gate). */
+let lastKnownHref = null;
+/** Throttle: Toolbar-Icon per Content-Ping erneuern (SW/Tab-Events können Grau wiederherstellen). */
+let lastAutodartsIconPingAt = 0;
 
 function isMatchPage() {
   const path = String(location.pathname || "").toLowerCase();
@@ -27,6 +28,20 @@ function pingAutodartsTabActive() {
   safeSend({ type: "AUTODARTS_TAB_ACTIVE" });
 }
 
+function hostLooksLikePlayAutodarts() {
+  const h = String(location.hostname || "").toLowerCase();
+  return h === "play.autodarts.io" || h.endsWith(".play.autodarts.io");
+}
+
+/** Nur wenn wir weiterhin auf Play-Autodarts sind — max. alle ~3 s (reicht zum „Icon bleibt bunt“-Healing). */
+function maybeReaffirmToolbarIcon() {
+  if (!hostLooksLikePlayAutodarts()) return;
+  const now = Date.now();
+  if (now - lastAutodartsIconPingAt < 3000) return;
+  lastAutodartsIconPingAt = now;
+  pingAutodartsTabActive();
+}
+
 function injectPageScriptOnce() {
   if (pageScriptInjected) return;
   try {
@@ -34,9 +49,14 @@ function injectPageScriptOnce() {
     s.src = chrome.runtime.getURL("Main/bridge/pageScript.js");
     s.type = "text/javascript";
     (document.documentElement || document.head).appendChild(s);
-    s.onload = () => s.remove();
+    s.onload = () => {
+      try {
+        s.remove();
+      } catch {
+        // ignore
+      }
+    };
     pageScriptInjected = true;
-    console.log("[Autodarts Modules] bridge/pageScript injected");
   } catch (e) {
     console.error("[Autodarts Modules] bridge inject failed", e);
   }
@@ -49,16 +69,38 @@ function ensureBridge() {
 
 function checkRouteChangeAndBridge() {
   const href = String(location.href || "");
-  if (href === lastKnownHref) return;
+  const pathname = String(location.pathname || "");
+  ensureBridge();
+
+  if (lastKnownHref === null) {
+    lastKnownHref = href;
+    lastAutodartsIconPingAt = Date.now();
+    pingAutodartsTabActive();
+    safeSend({
+      type: "AUTODARTS_NAVIGATION",
+      payload: {
+        href,
+        pathname,
+        previousPathname: "",
+        ts: Date.now(),
+        reason: "initial"
+      }
+    });
+    return;
+  }
+
+  if (href === lastKnownHref) {
+    maybeReaffirmToolbarIcon();
+    return;
+  }
   let previousPathname = "";
   try {
     previousPathname = new URL(lastKnownHref).pathname || "";
   } catch {
     previousPathname = "";
   }
-  const pathname = String(location.pathname || "");
   lastKnownHref = href;
-  ensureBridge();
+  lastAutodartsIconPingAt = Date.now();
   pingAutodartsTabActive();
   safeSend({
     type: "AUTODARTS_NAVIGATION",
@@ -69,6 +111,34 @@ function checkRouteChangeAndBridge() {
       ts: Date.now()
     }
   });
+}
+
+/** Explizite Korrektur-/Uebernehmen-/Ok-Bestätigung (zusaetzlich zu Undo), damit die Pipeline wie bei undo_click resettet. */
+function looksLikeVisitCorrectionButton(btn, buttonLabel) {
+  const hay = String(buttonLabel || "").toLowerCase();
+  if (!hay) return false;
+  if (hay.includes("korrektur")) return true;
+  if (hay.includes("korrigieren")) return true;
+  if (hay.includes("übernehmen") || hay.includes("ubernehmen")) return true;
+  if (hay.includes("apply")) return true;
+  if (hay.includes("correct")) return true;
+  return false;
+}
+
+/**
+ * Nach direkter Pfeil-Korrektur bestaetigt Autodarts per Chakra-„Ok“ (Check-Icon + Text).
+ * Schmal gehalten: nur echte Button-Elemente, Klasse `chakra-button`, sichtbarer Text genau „Ok“.
+ */
+function looksLikeVisitCorrectionConfirmOk(btn, buttonLabel) {
+  if (!btn || String(btn.tagName || "").toLowerCase() !== "button") return false;
+  const cls = String(btn.className || "").toLowerCase();
+  if (!cls.includes("chakra-button")) return false;
+
+  const norm = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const label = norm(buttonLabel);
+  const visible = norm(btn.innerText || btn.textContent);
+  if (label === "ok" || visible === "ok") return true;
+  return false;
 }
 
 function isUndoButton(btn) {
@@ -132,6 +202,14 @@ window.addEventListener("click", (ev) => {
       type: "AUTODARTS_UI_EVENT",
       payload: { kind: "undo_click", label: buttonLabel || "Undo", ts: Date.now() }
     });
+  } else if (
+    looksLikeVisitCorrectionButton(btn, buttonLabel) ||
+    looksLikeVisitCorrectionConfirmOk(btn, buttonLabel)
+  ) {
+    safeSend({
+      type: "AUTODARTS_UI_EVENT",
+      payload: { kind: "visit_correction_click", label: buttonLabel || "Ok", ts: Date.now() }
+    });
   }
 }, true);
 
@@ -175,18 +253,18 @@ window.addEventListener("hashchange", () => {
 window.addEventListener("focus", () => {
   checkRouteChangeAndBridge();
   ensureBridge();
-  pingAutodartsTabActive();
 });
 window.addEventListener("pageshow", () => {
   checkRouteChangeAndBridge();
   ensureBridge();
-  pingAutodartsTabActive();
 });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") pingAutodartsTabActive();
+  if (document.visibilityState !== "visible") return;
+  pingAutodartsTabActive();
+  checkRouteChangeAndBridge();
 });
 
 setInterval(checkRouteChangeAndBridge, 700);
 
 ensureBridge();
-pingAutodartsTabActive();
+checkRouteChangeAndBridge();

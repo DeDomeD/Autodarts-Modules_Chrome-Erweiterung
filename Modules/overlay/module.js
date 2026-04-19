@@ -96,6 +96,39 @@
           </div>
         </div>
 
+        <div class="card">
+          <div class="cardHeader">
+            <div class="cardTitle" data-i18n="overlay_pdc_appearance">PDC-TV Glow</div>
+          </div>
+          <div class="list">
+            <div class="formRow">
+              <label class="label" for="overlayPdcGlowHue" data-i18n="overlay_pdc_glow_hue">Glow-Farbe (Farbton)</label>
+              <div style="display:flex;align-items:center;gap:10px;width:100%;flex-wrap:wrap;">
+                <input type="range" id="overlayPdcGlowHue" class="hueSlider" min="0" max="360" step="1" />
+                <span id="overlayPdcGlowHueOut" style="min-width:2.75em;font-variant-numeric:tabular-nums;text-align:right">172</span>
+                <span style="opacity:0.7">°</span>
+              </div>
+              <div class="hint" data-i18n="overlay_pdc_glow_hue_hint">Gilt für das OBS-Overlay bei Schema „PDC TV Official“ (0–360°).</div>
+            </div>
+            <div class="formRow">
+              <label class="label" for="overlayPdcGlowIntensity" data-i18n="overlay_pdc_glow_intensity">Glow-Intensität</label>
+              <div style="display:flex;align-items:center;gap:10px;width:100%;">
+                <input
+                  type="range"
+                  id="overlayPdcGlowIntensity"
+                  min="0"
+                  max="100"
+                  step="1"
+                  style="flex:1;min-width:0;accent-color:var(--accent);"
+                />
+                <span id="overlayPdcGlowIntensityOut" style="min-width:2.5em;font-variant-numeric:tabular-nums;text-align:right">100</span>
+                <span style="opacity:0.7">%</span>
+              </div>
+              <div class="hint" data-i18n="overlay_pdc_glow_intensity_hint">0 = aus, 100 = volle Stärke.</div>
+            </div>
+          </div>
+        </div>
+
         <div class="spacer"></div>
       `;
     },
@@ -130,6 +163,54 @@
         }
         window.open(url, "_blank");
       });
+
+      const hueEl = root.querySelector("#overlayPdcGlowHue");
+      const hueOut = root.querySelector("#overlayPdcGlowHueOut");
+      const intEl = root.querySelector("#overlayPdcGlowIntensity");
+      const intOut = root.querySelector("#overlayPdcGlowIntensityOut");
+      const syncHueThumb = () => {
+        if (!hueEl) return;
+        hueEl.style.setProperty("--hue", String(parseInt(hueEl.value, 10) || 0));
+      };
+      let hueDebounce = null;
+      let intDebounce = null;
+      const commitGlow = async (partial) => {
+        await api.savePartial(partial);
+      };
+      hueEl?.addEventListener("input", () => {
+        syncHueThumb();
+        if (hueOut) hueOut.textContent = String(hueEl.value);
+        if (hueDebounce) clearTimeout(hueDebounce);
+        hueDebounce = setTimeout(() => {
+          hueDebounce = null;
+          void commitGlow({ pdcGlowHue: parseInt(hueEl.value, 10) });
+        }, 140);
+      });
+      hueEl?.addEventListener("change", () => {
+        syncHueThumb();
+        if (hueDebounce) {
+          clearTimeout(hueDebounce);
+          hueDebounce = null;
+        }
+        if (hueOut) hueOut.textContent = String(hueEl.value);
+        void commitGlow({ pdcGlowHue: parseInt(hueEl.value, 10) });
+      });
+      intEl?.addEventListener("input", () => {
+        if (intOut) intOut.textContent = String(intEl.value);
+        if (intDebounce) clearTimeout(intDebounce);
+        intDebounce = setTimeout(() => {
+          intDebounce = null;
+          void commitGlow({ pdcGlowIntensity: parseInt(intEl.value, 10) });
+        }, 140);
+      });
+      intEl?.addEventListener("change", () => {
+        if (intDebounce) {
+          clearTimeout(intDebounce);
+          intDebounce = null;
+        }
+        if (intOut) intOut.textContent = String(intEl.value);
+        void commitGlow({ pdcGlowIntensity: parseInt(intEl.value, 10) });
+      });
     },
     sync(api, settings) {
       const root = api.root;
@@ -142,6 +223,19 @@
       api.setValue(root, "overlaySbPassword", s.sbPassword || "");
       api.setValue(root, "overlayActionPrefix", String(s.actionPrefix || "").trim());
       api.setValue(root, "overlayWsPort", Number.isFinite(s.overlayWsPort) ? s.overlayWsPort : 4455);
+      const gh = Number.isFinite(s.pdcGlowHue) ? Math.max(0, Math.min(360, Math.round(s.pdcGlowHue))) : 172;
+      const gi = Number.isFinite(s.pdcGlowIntensity) ? Math.max(0, Math.min(100, Math.round(s.pdcGlowIntensity))) : 100;
+      const hueEl = root.querySelector("#overlayPdcGlowHue");
+      const intEl = root.querySelector("#overlayPdcGlowIntensity");
+      if (hueEl) {
+        hueEl.value = String(gh);
+        hueEl.style.setProperty("--hue", String(gh));
+      }
+      if (intEl) intEl.value = String(gi);
+      const hueOut = root.querySelector("#overlayPdcGlowHueOut");
+      const intOut = root.querySelector("#overlayPdcGlowIntensityOut");
+      if (hueOut) hueOut.textContent = String(gh);
+      if (intOut) intOut.textContent = String(gi);
       const connectionWrap = root.querySelector("#overlayConnectionWrap");
       if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
       const connectionGrid = root.querySelector("#overlayConnectionGrid");

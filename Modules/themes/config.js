@@ -1,7 +1,7 @@
-(function initWebsiteDesignModuleConfig(scope) {
+(function initThemesModuleConfig(scope) {
   const configs = scope.AD_SB_MODULE_CONFIGS || (scope.AD_SB_MODULE_CONFIGS = {});
-  configs.websitedesign = {
-    id: "websitedesign",
+  configs.themes = {
+    id: "themes",
     defaults: {
       websiteLayout: "horizontal",
       websiteTheme: "classic",
@@ -12,7 +12,17 @@
       websiteThemeBuilderData: "{}",
       websiteCustomThemesHorizontal: "[]",
       websiteCustomThemesVertical: "[]",
-      websiteCommunityFavorites: "[]"
+      websiteCommunityFavorites: "[]",
+      /**
+       * Zusätzliche Builder-Ziele: JSON-Array
+       * [{"key":"header-wrap","label":"Header","selector":"#app > div > header"}]
+       * key: nur a-z, 0-9, Bindestrich; selector: gültiger document.querySelector-String
+       */
+      websiteThemeBuilderTargets: "[]",
+      /** data:-URL (JPEG), leer = kein eigenes Hintergrundbild */
+      websiteBackgroundImageData: "",
+      /** cover | contain | auto */
+      websiteBackgroundSize: "cover"
     },
     ini: {
       togglesBool: ["websiteThemeBuilderEnabled", "websiteDartboardGlowEnabled"],
@@ -26,7 +36,10 @@
         websiteThemeBuilderData: "{}",
         websiteCustomThemesHorizontal: "[]",
         websiteCustomThemesVertical: "[]",
-        websiteCommunityFavorites: "[]"
+        websiteCommunityFavorites: "[]",
+        websiteThemeBuilderTargets: "[]",
+        websiteBackgroundImageData: "",
+        websiteBackgroundSize: "cover"
       }
     }
   };

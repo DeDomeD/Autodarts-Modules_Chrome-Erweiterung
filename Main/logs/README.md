@@ -4,9 +4,10 @@ Dieser Ordner enthaelt die Datei-Logs der Extension.
 
 ## Start
 
-1. `Main/logs/start-log-writer.cmd` doppelklicken
-2. Fenster offen lassen (der Writer laeuft dort)
-3. Extension neu laden
+1. In `Main/core/logger.js` die Konstante `LOCAL_WRITER_ENABLED` auf `true` setzen (Standard ist `false`, damit ohne Writer kein Netzwerk-Spam entsteht).
+2. `Main/logs/start-log-writer.cmd` doppelklicken
+3. Fenster offen lassen (der Writer laeuft dort)
+4. Extension neu laden
 
 Ab dann schreibt die Extension automatisch in:
 - `Main/logs/all.log` (alles)

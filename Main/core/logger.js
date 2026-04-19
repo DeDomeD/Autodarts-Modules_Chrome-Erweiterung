@@ -13,7 +13,8 @@
   const DAYS_TO_KEEP = 109;
   const DEFAULT_DAYS_TO_RETURN = 10;
   const ENTRIES_PER_CHANNEL_PER_DAY = 10;
-  const LOCAL_WRITER_ENABLED = true;
+  /** Nur auf `true` setzen, wenn `Main/logs/start-log-writer` laeuft — sonst spammt jeder Log-Eintrag einen fetch (Devtools: dauernd „ausstehend“). */
+  const LOCAL_WRITER_ENABLED = false;
   const LOCAL_WRITER_URL = "http://127.0.0.1:8765/log";
 
   const CHANNELS = [
@@ -25,6 +26,9 @@
     "actions",
     "sb",
     "obs",
+    "wled",
+    "pixelit",
+    "triggers",
     "overlay",
     "errors"
   ];
@@ -75,6 +79,104 @@
       body: JSON.stringify(entry)
     }).catch(() => {
       // keep silent to avoid console noise when local writer is not running
+    });
+  }
+
+  function mirrorCatFromLoggerChannel(rawChannel, message, data) {
+    const r = String(rawChannel || "").toLowerCase();
+    const m = String(message || "").toLowerCase();
+    if (r === "sb" || r === "actions") return "SB";
+    if (r === "obs") return "OBS";
+    if (r === "wled") return "WLED";
+    if (r === "errors") {
+      const typ =
+        data && typeof data === "object" && data.type != null ? String(data.type) : "";
+      if (typ && /^(GET_WLED|TRIGGER_WLED)/i.test(typ)) return "WLED";
+      if (typ && /^OBS_/i.test(typ)) return "OBS";
+      if (typ && /^SB_/i.test(typ)) return "SB";
+      if (m.includes("wled")) return "WLED";
+      if (m.includes("obs")) return "OBS";
+      if (m.includes("streamerbot") || m.includes("streamer.bot")) return "SB";
+      return "MISC";
+    }
+    if (
+      r === "throws" ||
+      r === "state" ||
+      r === "events" ||
+      r === "ui" ||
+      r === "overlay" ||
+      r === "triggers" ||
+      r === "system"
+    ) {
+      return "MISC";
+    }
+    return "MISC";
+  }
+
+  /**
+   * Verbindungs-Versuche (SB/OBS) nur als MISC — sichtbar, wenn im Overlay „ALL“ aktiv ist.
+   * Doppelte Connected/Disconnected-Zeilen weglassen (gleiche Infos wie [AutoDart - Modules] Status).
+   */
+  function refineMirrorCategoryForSbObs(rawChannel, message, baseCat) {
+    const r = String(rawChannel || "").toLowerCase();
+    const m = String(message || "").trim().toLowerCase();
+    if (r === "sb") {
+      if (m === "streamerbot connected" || m === "streamerbot ws closed") return { skip: true };
+      if (m === "connecting to streamerbot" || m === "reconnect scheduled" || m === "streamerbot ws open") {
+        return { skip: false, cat: "MISC" };
+      }
+      return { skip: false, cat: "SB" };
+    }
+    if (r === "obs") {
+      if (m.startsWith("obs connected (") || m.startsWith("obs disconnected (")) return { skip: true };
+      if (
+        m.startsWith("obs connecting (") ||
+        m.startsWith("obs ws open (") ||
+        m.startsWith("obs reconnect scheduled") ||
+        m.startsWith("obs endpoint unreachable (") ||
+        m.startsWith("obs websocket failed (") ||
+        m.startsWith("obs reconnect exhausted")
+      ) {
+        return { skip: false, cat: "MISC" };
+      }
+      return { skip: false, cat: "OBS" };
+    }
+    return { skip: false, cat: baseCat };
+  }
+
+  /** Action-Details nur im SB-„Voll“-Mirror; Kurzzeile [ADM] SB Action … kommt direkt aus sb-client. */
+  function shouldSkipActionsChannelMirror(rawChannel, message) {
+    if (String(rawChannel || "").toLowerCase() !== "actions") return false;
+    const m = String(message || "").trim().toLowerCase();
+    if (m === "action sent") return true;
+    if (m === "sb doaction") return true;
+    return false;
+  }
+
+  function pushWorkerMirrorForLogger(level, rawChannel, message, data) {
+    if (shouldSkipActionsChannelMirror(rawChannel, message)) return;
+    let cat = mirrorCatFromLoggerChannel(rawChannel, message, data);
+    const refined = refineMirrorCategoryForSbObs(rawChannel, message, cat);
+    if (refined.skip) return;
+    if (refined.cat) cat = refined.cat;
+    const tagStyle = "color:#64748b;font-weight:700";
+    const bodyStyle =
+      level === "error" ? "color:#fda4af;font-weight:500" : level === "warn" ? "color:#fcd34d;font-weight:500" : "color:#e2e8f0;font-weight:500";
+    let extra = "";
+    if (data !== undefined) {
+      try {
+        extra = ` ${JSON.stringify(data)}`;
+        if (extra.length > 260) extra = `${extra.slice(0, 260)}…`;
+      } catch {
+        extra = " [data]";
+      }
+    }
+    AD_SB.workerMirrorLog?.pushEntry?.({
+      category: cat,
+      segments: [
+        { css: tagStyle, text: `[${cat}] ` },
+        { css: bodyStyle, text: String(message || "") + extra }
+      ]
     });
   }
 
@@ -187,6 +289,7 @@
   }
 
   function write(level, channel, message, data) {
+    const rawChannel = String(channel || "system");
     const ch = CHANNELS.includes(channel) ? channel : "system";
     const now = Date.now();
     const dayKey = dateKeyFromTs(now);
@@ -210,6 +313,11 @@
     pruneOldDays();
     persistNow();
     shipToLocalWriter(entry);
+    try {
+      pushWorkerMirrorForLogger(String(level || "info"), rawChannel, message, data);
+    } catch {
+      // ignore
+    }
     return entry;
   }
 

@@ -1,6 +1,5 @@
 (function initObsZoomModule(scope) {
   scope.AD_SB_MODULES = scope.AD_SB_MODULES || {};
-  let CONNECTIONS_OPEN = false;
   let OBS_SCENES = [];
   let SOURCE_PICKER_OPEN = false;
   let OBS_SCENE_SOURCES = [];
@@ -31,6 +30,90 @@
     } catch {
       return `${DEFAULT_WEBSITE_BASE}/modules/obszoom.html#anleitung`;
     }
+  }
+
+  function parseObsZoomDisplayNames(raw) {
+    return String(raw || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split(/[\n,;]+/)
+      .map((s) => normalizeText(s))
+      .filter(Boolean);
+  }
+
+  function mergeObsZoomDisplayNameLists(a, b) {
+    const seen = new Set();
+    const out = [];
+    for (const list of [a, b]) {
+      for (const raw of list) {
+        const n = normalizeText(raw);
+        if (!n) continue;
+        const key = n.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(n);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Aktuelle Namensliste: UI-Textarea und getSettings() koennen nach savePartial kurz auseinanderlaufen —
+   * Merge ohne Duplikate, damit weder neue Chips noch gespeicherte Eintraege verloren gehen.
+   */
+  function readObsZoomPlayerNamesArray(api, root) {
+    const fromTa = parseObsZoomDisplayNames(root.querySelector("#obsZoomPlayerNamesList")?.value || "");
+    const fromSt = parseObsZoomDisplayNames(api.getSettings?.()?.obsZoomPlayerNamesList || "");
+    return mergeObsZoomDisplayNameLists(fromTa, fromSt);
+  }
+
+  function serializeObsZoomDisplayNames(arr) {
+    return arr.map((s) => normalizeText(s)).filter(Boolean).join("\n");
+  }
+
+  function escapeObsChipHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function obsZoomT(api, key) {
+    const lang = String(api?.getSettings?.()?.uiLanguage || "de").toLowerCase().startsWith("de") ? "de" : "en";
+    const pack = scope.AD_SB_I18N?.[lang]?.[key];
+    return String(pack || "");
+  }
+
+  function refreshObsZoomPlayerFilterUi(api, root, rawList) {
+    const names = parseObsZoomDisplayNames(rawList);
+    const statusEl = root.querySelector("#obsZoomPlayerFilterStatus");
+    const namedBlock = root.querySelector("#obsZoomPlayerFilterNamedBlock");
+    const chipsEl = root.querySelector("#obsZoomPlayerChips");
+    const hidden = root.querySelector("#obsZoomPlayerNamesList");
+    const serialized = serializeObsZoomDisplayNames(names);
+    if (hidden) hidden.value = serialized;
+    if (statusEl) statusEl.style.display = names.length ? "none" : "";
+    if (namedBlock) namedBlock.style.display = names.length ? "" : "none";
+    if (chipsEl) {
+      const removeAria = obsZoomT(api, "obszoom_player_chip_remove") || "Remove";
+      chipsEl.innerHTML = names
+        .map(
+          (n, idx) => `
+        <span class="obsZoomPlayerChip">
+          <span class="obsZoomPlayerChipLabel">${escapeObsChipHtml(n)}</span>
+          <button type="button" class="obsZoomPlayerChipRemove" data-obs-zoom-remove-player="${idx}" aria-label="${escapeObsChipHtml(removeAria)}">×</button>
+        </span>`
+        )
+        .join("");
+    }
+  }
+
+  async function persistObsZoomPlayerNames(api, root, namesArr) {
+    const str = serializeObsZoomDisplayNames(namesArr);
+    const mode = namesArr.length ? "names" : "all";
+    refreshObsZoomPlayerFilterUi(api, root, str);
+    await api.savePartial?.({ obsZoomPlayerNamesList: str, obsZoomPlayerFilterMode: mode });
   }
 
   function renderTestButtons() {
@@ -71,14 +154,15 @@
     await api.savePartial?.(partial);
   }
 
-  function renderConnectionButton(kind, label) {
+  function renderConnectionButton(kind, label, opts = {}) {
+    const withRetry = !!opts.withRetry;
     return `
       <button
         type="button"
         class="connectionStatusBtn"
         data-connection-kind="${kind}"
         ${kind === "obs" ? "data-obs-status" : "data-sb-status"}
-        data-connection-retry="${kind}"
+        ${withRetry ? `data-connection-retry="${kind}"` : ""}
       >
         <div class="connectionStatusLabel">
           <span>${label}</span>
@@ -227,7 +311,8 @@
     }
   }
 
-  async function reloadObsSceneSources(api, root, sceneName, silent = false) {
+  async function reloadObsSceneSources(api, root, sceneName, silent = false, opts = {}) {
+    const persistSelection = opts.persistSelection !== false;
     const targetScene = String(sceneName || "").trim();
     if (!targetScene) {
       OBS_SCENE_SOURCES = [];
@@ -244,11 +329,13 @@
       if (OBS_SCENE_SOURCES.includes(storedSource)) OBS_SELECTED_SOURCE = storedSource;
       if (!OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) OBS_SELECTED_SOURCE = OBS_SCENE_SOURCES[0] || "";
       // Quellen-Auswahl-Modal nur nach Create/Update (runCreateMoveFiltersFlow), nie bei passivem Laden
-      const persist = { obsZoomSceneName: targetScene };
-      if (OBS_SELECTED_SOURCE && OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) {
-        persist.obsZoomTargetSource = OBS_SELECTED_SOURCE;
+      if (persistSelection) {
+        const persist = { obsZoomSceneName: targetScene };
+        if (OBS_SELECTED_SOURCE && OBS_SCENE_SOURCES.includes(OBS_SELECTED_SOURCE)) {
+          persist.obsZoomTargetSource = OBS_SELECTED_SOURCE;
+        }
+        await api.savePartial?.(persist);
       }
-      await api.savePartial?.(persist);
       scope.AD_SB_MODULES.obszoom.sync(api, api.getSettings?.() || {});
       if (!silent) {
         api.setStatus?.(OBS_SCENE_SOURCES.length ? `Quellen geladen: ${OBS_SCENE_SOURCES.length}` : "Keine Quellen in der Szene gefunden.");
@@ -377,105 +464,65 @@
     render() {
       return `
         <h2 class="title"><span data-i18n="title_obszoom">Zoom</span><span class="titleMeta">OBS</span></h2>
-        <div class="card">
+        <div class="card" data-settings-nav-connections style="cursor:pointer;">
           <div class="sectionHead">
             <div class="sectionTitle" style="margin:0;" data-i18n="section_connections">Verbindungen</div>
-            <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="obsZoomConnectionToggle" aria-label="Zoom Verbindungen" title="Zoom Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button>
           </div>
-          <div class="connectionStatusGrid" id="obsZoomConnectionGrid" data-connections-open="${CONNECTIONS_OPEN ? "true" : "false"}">
-            ${renderConnectionButton("obs", "OBS")}
-            ${renderConnectionButton("sb", "Streamer.bot")}
+          <div class="connectionStatusGrid" id="obsZoomConnectionStripGrid" data-connections-open="false">
+            ${renderConnectionButton("obs", "OBS", { withRetry: false })}
+            ${renderConnectionButton("sb", "Streamer.bot", { withRetry: false })}
           </div>
-          <div class="inlinePopupWrap${CONNECTIONS_OPEN ? " open" : ""}" id="obsZoomConnectionWrap" style="padding:0; border-top:none; background:transparent;">
-            <div class="formRow">
-              <div class="connectionInputHeader">
-                <label class="label" for="obsUrl">OBS WS URL</label>
-                <div class="connectionInputSwitch">
-                  <span>Aktiv</span>
-                  <label class="switch switchCompact"><input id="obsZoomObsEnabled" type="checkbox" /><span class="slider"></span></label>
-                </div>
-              </div>
-              <input class="input" id="obsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
-              <div class="hint" data-i18n="hint_obs_ws">OBS WebSocket Server</div>
-            </div>
-            <div class="formRow">
-              <label class="label" for="obsZoomObsPassword">OBS Passwort</label>
-              <input class="input" id="obsZoomObsPassword" type="password" placeholder="optional" />
-            </div>
-            <div class="divider"></div>
-            <div class="formRow">
-              <div class="connectionInputHeader">
-                <label class="label" for="obsZoomSbUrl">Streamer.bot WS URL</label>
-                <div class="connectionInputSwitch">
-                  <span>Aktiv</span>
-                  <label class="switch switchCompact"><input id="obsZoomSbEnabled" type="checkbox" /><span class="slider"></span></label>
-                </div>
-              </div>
-              <input class="input" id="obsZoomSbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
-              <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
-            </div>
-            <div class="formRow">
-              <label class="label" for="obsZoomSbPassword">Streamer.bot Passwort</label>
-              <input class="input" id="obsZoomSbPassword" type="password" placeholder="optional" />
-            </div>
-            <div class="formRow">
-              <label class="label" for="obsZoomActionPrefix" data-i18n="label_action_prefix">Action Prefix</label>
-              <input class="input" id="obsZoomActionPrefix" type="text" placeholder="AD-SB " />
-              <div class="hint" data-i18n="hint_action_prefix">Actions run as Prefix + Suffix.</div>
-            </div>
-          </div>
+          <div class="hint" style="margin-top:8px;" data-i18n="module_connections_tap_hint">Tippen, um die Verbindungen in den Einstellungen zu oeffnen.</div>
         </div>
 
-        <div class="card">
-          <div class="sectionTitle" data-i18n="obszoom_section_player_filter">Zoom: Wer triggert</div>
-          <div class="hint" data-i18n="obszoom_player_filter_hint">Steuert, bei welchen Spielern OBS-Zoom auf Würfe und Checkout-Hinweise reagiert. „Mein Spieler-Index“ kommt aus den Einstellungen.</div>
+        <div class="card obsZoomPlayerFilterCard">
+          <div class="sectionTitle" data-i18n="obszoom_section_player_filter">Trigger</div>
           <div class="formRow">
-            <label class="label" for="obsZoomPlayerFilterMode" data-i18n="obszoom_player_filter_mode_label">Modus</label>
-            <select class="input" id="obsZoomPlayerFilterMode">
-              <option value="all" data-i18n="obszoom_player_filter_mode_all">Alle Spieler</option>
-              <option value="my_index" data-i18n="obszoom_player_filter_mode_my_index">Nur mein Spielerindex</option>
-              <option value="names" data-i18n="obszoom_player_filter_mode_names">Nur folgende Namen</option>
-              <option value="my_index_or_names" data-i18n="obszoom_player_filter_mode_my_or_names">Mein Index oder Namen</option>
-            </select>
+            <label class="label" for="obsZoomCheckoutTriggerThreshold" data-i18n="checkout_threshold_label">Checkout Schwelle</label>
+            <input class="input" id="obsZoomCheckoutTriggerThreshold" type="number" min="2" max="170" step="1" value="170" />
+            <div class="hint" data-i18n="checkout_threshold_hint">Ab diesem Restwert und darunter wird der Checkout-Trigger aktiv.</div>
           </div>
-          <div class="formRow">
-            <label class="label" for="obsZoomPlayerNamesList" data-i18n="obszoom_player_names_label">Namen</label>
-            <textarea class="input" id="obsZoomPlayerNamesList" rows="3" placeholder="z. B. pro Zeile oder mit Komma"></textarea>
-            <div class="hint" data-i18n="obszoom_player_names_hint">Eine Zeile oder Komma getrennt; Groß/klein egal. Bei „Nur Namen“ mindestens einen Eintrag.</div>
+          <div class="formRow" style="margin-top:10px;">
+            <button type="button" class="btnPrimary obsZoomPlayerNameBtn" id="btnObsZoomAddPlayerName" data-i18n="obszoom_player_name_btn">Player Name</button>
           </div>
+          <div id="obsZoomPlayerFilterStatus" class="obsZoomPlayerFilterStatus hint" style="margin-top:8px;" data-i18n="obszoom_player_filter_empty_status">Immer — kein Spielername eingetragen.</div>
+          <div id="obsZoomPlayerFilterNamedBlock" class="obsZoomPlayerFilterNamedBlock" style="display:none;margin-top:8px;">
+            <div class="obsZoomPlayerWhenLabel" data-i18n="obszoom_player_filter_when_throw">Wenn Spieler wirft:</div>
+            <div id="obsZoomPlayerChips" class="obsZoomPlayerChips"></div>
+          </div>
+          <textarea id="obsZoomPlayerNamesList" style="display:none;" aria-hidden="true" tabindex="-1"></textarea>
         </div>
 
         <div class="card">
           <div class="sectionTitle" style="margin:0 0 12px 0;">OBS Szenen</div>
-          <div class="hint" style="margin-bottom:12px;">Hier werden alle Filter automatisch erstellt, eine manuelle Ausrichtung in OBS wird jedoch weiterhin benoetigt.</div>
           <div class="formRow">
-            <label class="label" for="obsZoomCheckoutTriggerThreshold">Checkout Schwelle</label>
-            <input class="input" id="obsZoomCheckoutTriggerThreshold" type="number" min="2" max="170" step="1" value="170" />
-            <div class="hint">Ab diesem Restwert und darunter wird der Checkout-Trigger aktiv.</div>
-          </div>
-          <div class="formRow obsZoomSceneSourceRow">
-            <div class="obsZoomSceneCol">
-              <div class="obsZoomSceneSelectHead">
+            <div class="obsZoomSceneSourcePair">
+              <div class="obsZoomScenePick">
                 <label class="label" for="obsZoomSceneSelect" data-i18n="obszoom_scene_label">Szene</label>
-                <button class="miniChevronBtn" id="btnRefreshObsScenes" type="button" title="Szenen aktualisieren" aria-label="Szenen aktualisieren" style="min-width:28px; width:28px; height:28px; padding:0;">
-                  <span class="refreshGlyph"></span>
-                </button>
+                <select class="input" id="obsZoomSceneSelect">
+                  ${renderSceneOptions()}
+                </select>
               </div>
-              <select class="input" id="obsZoomSceneSelect">
-                ${renderSceneOptions()}
-              </select>
-            </div>
-            <div class="obsZoomSourceCol">
-              <label class="label" for="obsZoomSourceSelect" data-i18n="obszoom_source_label">Quelle</label>
-              <select class="input" id="obsZoomSourceSelect">
-                ${renderSourceOptions(null)}
-              </select>
+              <div class="obsZoomSourcePick">
+                <label class="label" for="obsZoomSourceSelect" data-i18n="obszoom_source_label">Quelle</label>
+                <div class="obsZoomSourceSelectRow">
+                  <select class="input" id="obsZoomSourceSelect">
+                    ${renderSourceOptions(null)}
+                  </select>
+                  <button class="miniChevronBtn" id="btnRefreshObsScenes" type="button" title="Szenen aktualisieren" aria-label="Szenen aktualisieren" style="min-width:28px; width:28px; height:28px; padding:0; flex-shrink:0;">
+                    <span class="refreshGlyph"></span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="hint">Diese Szene wird auch fuer automatische Checkout-Trigger verwendet.</div>
           <div class="formRow">
             <label class="label" for="obsZoomMoveDuration">Duration (ms)</label>
             <input class="input" id="obsZoomMoveDuration" type="number" min="0" step="50" value="300" />
+          </div>
+          <div class="formRow" style="margin-top:8px;">
+            <button type="button" class="btn secondary" id="btnObsZoomOpenCalibWindow">Zoom-Zuordnung öffnen …</button>
+            <div class="hint" style="margin-top:6px;">Öffnet ein separates Fenster für Screenshot, Segmente und OBS-Schreiben.</div>
           </div>
           <div class="formRow">
             <label class="label" for="obsZoomEasingType">Easing Type</label>
@@ -528,7 +575,6 @@
 
         <div class="card">
           <div class="sectionTitle" style="margin:0 0 12px 0;">Test Area</div>
-          <div class="hint" style="margin-bottom:12px;">Presets (<code>T20</code>, <code>BULL</code>, <code>D10</code>, <code>T19</code>, Main) feuern sofort &mdash; ohne das Feld unten zu aendern. Das Feld <strong>Trigger</strong> ist nur fuer eigene Befehle; mit <strong>Testen</strong> ausfuehren.</div>
           <div class="miniButtonRow" style="margin-bottom:12px;">
             ${renderTestButtons()}
           </div>
@@ -561,20 +607,29 @@
     },
     bind(api) {
       const root = api.root;
-      root.querySelector("#obsZoomConnectionToggle")?.addEventListener("click", () => {
-        CONNECTIONS_OPEN = !CONNECTIONS_OPEN;
-        scope.AD_SB_MODULES.obszoom.sync(api, api.getSettings?.() || {});
-      });
-      api.bindAuto(root, "obsZoomObsEnabled", "obsEnabled");
-      api.bindAuto(root, "obsZoomSbEnabled", "sbEnabled");
-      api.bindAutoImmediate(root, "obsUrl", "obsUrl", (value) => String(value || "").trim());
-      api.bindAutoImmediate(root, "obsZoomObsPassword", "obsPassword", (value) => String(value || ""));
-      api.bindAutoImmediate(root, "obsZoomSbUrl", "sbUrl", (value) => String(value || "").trim());
-      api.bindAutoImmediate(root, "obsZoomSbPassword", "sbPassword", (value) => String(value || ""));
-      api.bindAutoImmediate(root, "obsZoomActionPrefix", "actionPrefix", (value) => api.normalizePrefix(value || ""));
       api.bindAuto(root, "obsZoomCheckoutTriggerThreshold", "checkoutTriggerThreshold", "number");
-      api.bindAuto(root, "obsZoomPlayerFilterMode", "obsZoomPlayerFilterMode", "text");
-      api.bindAutoImmediate(root, "obsZoomPlayerNamesList", "obsZoomPlayerNamesList", (value) => String(value || ""));
+      root.querySelector("#btnObsZoomAddPlayerName")?.addEventListener("click", async () => {
+        const langDe = String(api.getSettings?.()?.uiLanguage || "de").toLowerCase().startsWith("de");
+        const entered = normalizeText(window.prompt(langDe ? "Spielername:" : "Player name:", ""));
+        if (!entered) return;
+        const cur = readObsZoomPlayerNamesArray(api, root);
+        if (cur.some((n) => n.toLowerCase() === entered.toLowerCase())) {
+          api.setStatus?.(obsZoomT(api, "obszoom_player_name_duplicate") || (langDe ? "Name schon auf der Liste." : "Already on the list."));
+          return;
+        }
+        cur.push(entered);
+        await persistObsZoomPlayerNames(api, root, cur);
+      });
+      root.querySelector("#obsZoomPlayerChips")?.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("[data-obs-zoom-remove-player]");
+        if (!btn) return;
+        const idx = Number(btn.getAttribute("data-obs-zoom-remove-player"));
+        if (!Number.isFinite(idx) || idx < 0) return;
+        const cur = readObsZoomPlayerNamesArray(api, root);
+        if (idx >= cur.length) return;
+        cur.splice(idx, 1);
+        await persistObsZoomPlayerNames(api, root, cur);
+      });
       root.querySelector("#obsZoomSceneSelect")?.addEventListener("change", async (ev) => {
         const sceneName = normalizeText(ev.target?.value);
         await api.savePartial?.({ obsZoomSceneName: sceneName });
@@ -592,6 +647,18 @@
         const v = Math.max(0, Number(root.querySelector("#obsZoomMoveDuration")?.value) || 0);
         OBS_MOVE_DURATION = v;
         void api.savePartial?.({ obsZoomDurationMs: v });
+      });
+      root.querySelector("#btnObsZoomOpenCalibWindow")?.addEventListener("click", () => {
+        try {
+          const url = chrome.runtime.getURL("Main/obszoom-calib.html");
+          if (chrome?.windows?.create) {
+            chrome.windows.create({ url, type: "popup", width: 1060, height: 840, focused: true });
+          } else {
+            chrome.tabs.create({ url });
+          }
+        } catch (error) {
+          api.setStatus?.(`Kalibrierungs-Fenster: ${String(error?.message || error || "unknown_error")}`);
+        }
       });
       root.querySelector("#obsZoomIncludeSingles")?.addEventListener("change", (ev) => {
         OBS_INCLUDE_SINGLES = !!ev.target?.checked;
@@ -826,6 +893,7 @@
           if (typeof action === "function") {
             await action();
           }
+          return;
         }
       });
     },
@@ -845,13 +913,6 @@
         const tt = normalizeText(s.obsZoomLastTestTrigger || "T20").toUpperCase();
         OBS_TEST_TRIGGER = tt || "T20";
       }
-      api.setChecked(root, "obsZoomObsEnabled", s.obsEnabled !== false);
-      api.setChecked(root, "obsZoomSbEnabled", s.sbEnabled !== false);
-      api.setValue(root, "obsUrl", s.obsUrl || "");
-      api.setValue(root, "obsZoomObsPassword", s.obsPassword || "");
-      api.setValue(root, "obsZoomSbUrl", s.sbUrl || "");
-      api.setValue(root, "obsZoomSbPassword", s.sbPassword || "");
-      api.setValue(root, "obsZoomActionPrefix", String(s.actionPrefix || "").trim());
       const sceneSelect = root.querySelector("#obsZoomSceneSelect");
       if (sceneSelect) {
         const storedScene = normalizeText(s.obsZoomSceneName);
@@ -886,8 +947,12 @@
       const warningModalMount = root.querySelector("#obsZoomWarningModalMount");
       if (warningModalMount) warningModalMount.innerHTML = renderWarningModal();
       api.setValue(root, "obsZoomCheckoutTriggerThreshold", Number.isFinite(s.checkoutTriggerThreshold) ? s.checkoutTriggerThreshold : 170);
-      api.setValue(root, "obsZoomPlayerFilterMode", String(s.obsZoomPlayerFilterMode || "all"));
-      api.setValue(root, "obsZoomPlayerNamesList", String(s.obsZoomPlayerNamesList || ""));
+      refreshObsZoomPlayerFilterUi(api, root, String(s.obsZoomPlayerNamesList || ""));
+      const namesCount = parseObsZoomDisplayNames(s.obsZoomPlayerNamesList || "").length;
+      const filterMode = namesCount ? "names" : "all";
+      if (String(s.obsZoomPlayerFilterMode || "") !== filterMode) {
+        void api.savePartial?.({ obsZoomPlayerFilterMode: filterMode });
+      }
       api.setValue(root, "obsZoomMoveDuration", OBS_MOVE_DURATION);
       const singlesInput = root.querySelector("#obsZoomIncludeSingles");
       if (singlesInput) singlesInput.checked = OBS_INCLUDE_SINGLES;
@@ -898,23 +963,29 @@
       api.setValue(root, "obsZoomEasingType", OBS_EASING_TYPE);
       api.setValue(root, "obsZoomEasingFunction", OBS_EASING_FUNCTION);
       api.setValue(root, "obsZoomTestTrigger", OBS_TEST_TRIGGER);
-      const connectionWrap = root.querySelector("#obsZoomConnectionWrap");
-      if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
-      const connectionGrid = root.querySelector("#obsZoomConnectionGrid");
+      const connectionGrid = root.querySelector("#obsZoomConnectionStripGrid");
       if (connectionGrid) {
-        connectionGrid.dataset.connectionsOpen = CONNECTIONS_OPEN ? "true" : "false";
+        connectionGrid.dataset.connectionsOpen = "false";
         const visibleCount = Array.from(connectionGrid.querySelectorAll("[data-connection-kind]")).filter((node) => {
           const kind = String(node.dataset.connectionKind || "");
           return kind === "obs" ? s.obsEnabled !== false : s.sbEnabled !== false;
         }).length;
         connectionGrid.classList.toggle("compactSingle", visibleCount <= 1);
       }
-      const connectionToggle = root.querySelector("#obsZoomConnectionToggle");
-      if (connectionToggle) {
-        connectionToggle.classList.toggle("active", CONNECTIONS_OPEN);
-        connectionToggle.innerHTML = `<span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span>`;
-      }
       api.refreshConnectionStatuses?.();
+    },
+    async refreshObsListsOnPopupOpen(api) {
+      const root = api?.root;
+      if (!root) return;
+      try {
+        await reloadObsScenes(api, root, true);
+        const fromDom = normalizeText(root.querySelector("#obsZoomSceneSelect")?.value);
+        const fromSettings = normalizeText(api.getSettings?.()?.obsZoomSceneName);
+        const scene = fromDom || fromSettings || "";
+        if (scene) await reloadObsSceneSources(api, root, scene, true, { persistSelection: false });
+      } catch {
+        /* silent */
+      }
     }
   };
 })(window);

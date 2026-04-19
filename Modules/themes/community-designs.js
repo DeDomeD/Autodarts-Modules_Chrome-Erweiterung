@@ -1,4 +1,4 @@
-(function initWebsiteCommunityDesigns(scope) {
+(function initThemesCommunityDesigns(scope) {
   scope.AD_SB_WEBSITE_COMMUNITY_THEMES = [
     {
       id: "pimp-arena",
@@ -34,12 +34,12 @@
       `
     },
     {
-      id: "tools-glass",
-      label: "Tools Glass",
+      id: "stream-glass",
+      label: "Stream Glass",
       layout: "horizontal",
-      sourceName: "Firefox Add-ons",
-      sourceUrl: "https://modules.mozilla.org/sk/firefox/module/tools-for-autodarts/",
-      author: "creazy.eth",
+      sourceName: "Community",
+      sourceUrl: "https://play.autodarts.io/",
+      author: "Community",
       description: "Klare Streaming-Optik mit sauberem Kontrast und ruhigen Karten.",
       tags: ["Community", "Stream", "Glass"],
       preview: {
@@ -205,4 +205,27 @@
       `
     }
   ];
+  (function mergeCommunityDesignsIntoThemeSets(s) {
+    try {
+      const list = s.AD_SB_WEBSITE_COMMUNITY_THEMES;
+      const sets = s.AD_SB_WEBSITE_THEME_SETS;
+      if (!Array.isArray(list) || !sets) return;
+      const existing = new Set();
+      for (const key of ["horizontal", "vertical"]) {
+        if (!Array.isArray(sets[key])) continue;
+        for (const t of sets[key]) {
+          const id = String(t?.id || "").toLowerCase();
+          if (id) existing.add(id);
+        }
+      }
+      for (const t of list) {
+        const lay = String(t.layout || "horizontal").toLowerCase() === "vertical" ? "vertical" : "horizontal";
+        if (!Array.isArray(sets[lay])) sets[lay] = [];
+        const id = String(t.id || "").toLowerCase();
+        if (id && existing.has(id)) continue;
+        if (id) existing.add(id);
+        sets[lay].push({ ...t, libraryOnly: true });
+      }
+    } catch (_) {}
+  })(scope);
 })(window);

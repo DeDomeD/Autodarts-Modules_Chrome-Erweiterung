@@ -1,7 +1,4 @@
 (function initMainSettingsPage(scope) {
-  let ACCOUNT_STATUS_TEXT = "";
-  const DEFAULT_WEBSITE_API_URL = "https://autodarts-modules-production.up.railway.app";
-
   scope.AD_SB_MAIN_SETTINGS = {
     id: "settings",
     icon: "[]",
@@ -10,7 +7,21 @@
       return `
         <h2 class="title" data-i18n="title_settings">Settings</h2>
 
-        <div class="sectionTitle" data-i18n="section_general">General</div>
+        <div class="sectionHead" style="margin-top:0;">
+          <div class="sectionTitle" data-i18n="section_debug">Debug</div>
+          <button
+            type="button"
+            id="btnOpenServiceWorker"
+            class="btnMini"
+            style="font-size:15px;line-height:1;padding:4px 9px;"
+            data-i18n-title="debug_open_worker_title"
+            data-i18n-aria-label="debug_open_worker_title"
+            title=""
+            aria-label=""
+          >👁</button>
+        </div>
+
+        <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_general">General</div>
         <div class="card">
           <div class="formRow">
             <label class="label" for="uiLanguage" data-i18n="language_label">Language</label>
@@ -22,118 +33,64 @@
           </div>
         </div>
 
-        <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_account">Account</div>
-        <div class="card">
-          <div class="formRow">
-            <label class="label" for="websiteApiUrl" data-i18n="website_api_url_label">Website API URL</label>
-            <input class="input" id="websiteApiUrl" type="text" placeholder="${DEFAULT_WEBSITE_API_URL}" />
-            <div class="hint" data-i18n="website_api_url_hint">Standard fuer Website-Account und Extension-Login ist ${DEFAULT_WEBSITE_API_URL}</div>
+        <div id="settingsConnectionsSection" class="card" style="margin-top:14px;scroll-margin-top:10px;">
+          <div class="sectionTitle" data-i18n="section_central_connections">Verbindungen (OBS, Streamer.bot, WLED)</div>
+          <div class="hint" data-i18n="connections_central_hint">Diese Zugangsdaten nutzen Effekte, OBS-Zoom und WLED gemeinsam.</div>
+          <div class="connectionStatusGrid" id="settingsConnectionGrid" data-connections-open="true" style="margin-top:10px;">
+            <button type="button" class="connectionStatusBtn" data-connection-kind="obs" data-obs-status data-connection-retry="obs">
+              <div class="connectionStatusLabel">
+                <span>OBS</span>
+                <span class="connectionStatusText" data-connection-status-text></span>
+                <span class="connectionStatusAttempts" data-connection-attempts></span>
+              </div>
+            </button>
+            <button type="button" class="connectionStatusBtn" data-connection-kind="sb" data-sb-status data-connection-retry="sb">
+              <div class="connectionStatusLabel">
+                <span>Streamer.bot</span>
+                <span class="connectionStatusText" data-connection-status-text></span>
+                <span class="connectionStatusAttempts" data-connection-attempts></span>
+              </div>
+            </button>
           </div>
-
+          <div class="formRow" style="margin-top:12px;">
+            <div class="connectionInputHeader">
+              <label class="label" for="settingsObsUrl" data-i18n="hint_obs_ws">OBS WebSocket</label>
+              <div class="connectionInputSwitch">
+                <span>Aktiv</span>
+                <label class="switch switchCompact"><input id="settingsObsEnabled" type="checkbox" /><span class="slider"></span></label>
+              </div>
+            </div>
+            <input class="input" id="settingsObsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
+          </div>
+          <div class="formRow">
+            <label class="label" for="settingsObsPassword">OBS Passwort</label>
+            <input class="input" id="settingsObsPassword" type="password" placeholder="optional" />
+          </div>
           <div class="divider"></div>
-
-          <div class="sectionHead">
-            <div class="sectionTitle" style="margin:0;" data-i18n="account_register_title">Account erstellen</div>
+          <div class="formRow">
+            <div class="connectionInputHeader">
+              <label class="label" for="settingsSbUrl" data-i18n="hint_sb_ws">Streamer.bot</label>
+              <div class="connectionInputSwitch">
+                <span>Aktiv</span>
+                <label class="switch switchCompact"><input id="settingsSbEnabled" type="checkbox" /><span class="slider"></span></label>
+              </div>
+            </div>
+            <input class="input" id="settingsSbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
           </div>
           <div class="formRow">
-            <label class="label" for="accountUsername" data-i18n="account_username_label">Username</label>
-            <input class="input" id="accountUsername" type="text" placeholder="z. B. Dominik" />
+            <label class="label" for="settingsSbPassword">Streamer.bot Passwort</label>
+            <input class="input" id="settingsSbPassword" type="password" placeholder="optional" />
           </div>
           <div class="formRow">
-            <label class="label" for="accountEmail" data-i18n="account_email_label">Email</label>
-            <input class="input" id="accountEmail" type="email" placeholder="du@example.com" />
+            <label class="label" for="settingsActionPrefix" data-i18n="label_action_prefix">Action Prefix</label>
+            <input class="input" id="settingsActionPrefix" type="text" placeholder="AD-SB " />
+            <div class="hint" data-i18n="hint_action_prefix">Actions run as Prefix + Suffix.</div>
           </div>
-          <div class="formRow">
-            <label class="label" for="accountPassword" data-i18n="account_password_label">Passwort</label>
-            <input class="input" id="accountPassword" type="password" placeholder="mindestens 6 Zeichen" />
-          </div>
-          <div class="rowSplit">
-            <button id="btnAccountRegister" class="btnPrimary" type="button" data-i18n="account_register_btn">Registrieren</button>
-          </div>
-
           <div class="divider"></div>
-
-          <div class="sectionHead">
-            <div class="sectionTitle" style="margin:0;" data-i18n="account_login_title">Login</div>
-          </div>
-          <div class="rowSplit">
-            <button id="btnAccountLogin" class="btnPrimary" type="button" data-i18n="account_login_btn">Einloggen</button>
-            <button id="btnAccountGoogle" class="btn" type="button" data-i18n="account_google_btn">Mit Google anmelden</button>
-            <button id="btnAccountLogout" class="btn" type="button" data-i18n="account_logout_btn">Logout</button>
-          </div>
-          <div class="rowSplit" style="margin-top:10px;">
-            <button id="btnOpenWebsiteAccount" class="btn" type="button" data-i18n="account_open_website_btn">Website Account</button>
-          </div>
-          <div class="hint" id="accountStatus" style="margin-top:10px;"></div>
-        </div>
-
-        <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_throw_filter">Throw Filter</div>
-        <div class="card">
-          <div class="list">
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle" data-i18n="only_my_throws_title">Only my throws</div>
-                <div class="liSub" data-i18n="only_my_throws_sub">Filter by player index</div>
-              </div>
-              <label class="switch">
-                <input id="onlyMyThrows" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-          <div class="formRow">
-            <label class="label" for="myPlayerIndex" data-i18n="label_my_player_index">My player index</label>
-            <input class="input" id="myPlayerIndex" type="number" min="0" step="1" />
-            <div class="hint" data-i18n="hint_my_player_index">Used for the throw filter.</div>
-          </div>
-        </div>
-
-        <div class="sectionTitle" style="margin-top:14px;" data-i18n="section_debug">Debug</div>
-        <div class="card">
-          <div class="list">
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle" data-i18n="debug_all_logs_title">Alle Logs</div>
-                <div class="liSub" data-i18n="debug_all_logs_sub">Zeigt alle Worker-Logs, auch ausgeblendete Debug-Zeilen</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="debugAllLogs" />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle" data-i18n="debug_actions_title">Debug: Actions</div>
-                <div class="liSub" data-i18n="debug_actions_sub">Console logs for actions</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="debugActions" />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle" data-i18n="debug_obs_title">Debug: OBS</div>
-                <div class="liSub" data-i18n="debug_obs_sub">Console logs for OBS connection and requests</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="debugObs" />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="listToggle">
-              <div class="liText">
-                <div class="liTitle" data-i18n="debug_game_events_title">Debug: Game Events</div>
-                <div class="liSub" data-i18n="debug_game_events_sub">Console logs for events</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="debugGameEvents" />
-                <span class="slider"></span>
-              </label>
-            </div>
+          <div class="sectionTitle" style="margin-top:4px;" data-i18n="wled_controllers_section">WLED Controller</div>
+          <div id="settingsWledControllersMount"></div>
+          <div class="rowSplit" style="margin-top:12px;">
+            <button id="settingsAddWledControllerBtn" class="btnMini" type="button" data-i18n="wled_add_controller_plus_btn">+ Controller</button>
           </div>
         </div>
 
@@ -157,95 +114,28 @@
     bind(api) {
       const root = api.root;
 
-      async function saveAccountSession(data, statusText) {
-        const nextUser = data?.user || null;
-        ACCOUNT_STATUS_TEXT = statusText || "";
-        await api.savePartial({
-          websiteApiUrl: api.normalizeWebsiteApiUrl(root.querySelector("#websiteApiUrl")?.value || ""),
-          accountToken: String(data?.token || "").trim(),
-          accountUserJson: nextUser ? JSON.stringify(nextUser) : ""
-        });
-      }
+      api.bindAuto(root, "settingsObsEnabled", "obsEnabled");
+      api.bindAuto(root, "settingsSbEnabled", "sbEnabled");
+      api.bindAutoImmediate(root, "settingsObsUrl", "obsUrl", (value) => String(value || "").trim());
+      api.bindAutoImmediate(root, "settingsObsPassword", "obsPassword", (value) => String(value || ""));
+      api.bindAutoImmediate(root, "settingsSbUrl", "sbUrl", (value) => String(value || "").trim());
+      api.bindAutoImmediate(root, "settingsSbPassword", "sbPassword", (value) => String(value || ""));
+      api.bindAutoImmediate(root, "settingsActionPrefix", "actionPrefix", (value) => api.normalizePrefix(value || ""));
 
-      root.querySelector("#websiteApiUrl")?.addEventListener("change", async () => {
-        await api.savePartial({
-          websiteApiUrl: api.normalizeWebsiteApiUrl(root.querySelector("#websiteApiUrl")?.value || "")
-        });
-      });
-
-      root.querySelector("#btnAccountRegister")?.addEventListener("click", async () => {
-        const statusEl = root.querySelector("#accountStatus");
-        try {
-          if (statusEl) statusEl.textContent = api.t("account_status_registering");
-          const data = await api.callWebsiteApi("/api/auth/register", {
-            method: "POST",
-            baseUrl: root.querySelector("#websiteApiUrl")?.value || "",
-            body: {
-              username: root.querySelector("#accountUsername")?.value || "",
-              email: root.querySelector("#accountEmail")?.value || "",
-              password: root.querySelector("#accountPassword")?.value || ""
-            }
-          });
-          await saveAccountSession(data, api.t("account_status_logged_in", { name: data?.user?.username || "?" }));
-        } catch (e) {
-          ACCOUNT_STATUS_TEXT = String(e?.message || e);
-          scope.AD_SB_MAIN_SETTINGS.sync(api, api.getSettings?.() || {});
-        }
-      });
-
-      root.querySelector("#btnAccountLogin")?.addEventListener("click", async () => {
-        const statusEl = root.querySelector("#accountStatus");
-        try {
-          if (statusEl) statusEl.textContent = api.t("account_status_logging_in");
-          const data = await api.callWebsiteApi("/api/auth/login", {
-            method: "POST",
-            baseUrl: root.querySelector("#websiteApiUrl")?.value || "",
-            body: {
-              email: root.querySelector("#accountEmail")?.value || "",
-              password: root.querySelector("#accountPassword")?.value || ""
-            }
-          });
-          await saveAccountSession(data, api.t("account_status_logged_in", { name: data?.user?.username || "?" }));
-        } catch (e) {
-          ACCOUNT_STATUS_TEXT = String(e?.message || e);
-          scope.AD_SB_MAIN_SETTINGS.sync(api, api.getSettings?.() || {});
-        }
-      });
-
-      root.querySelector("#btnAccountLogout")?.addEventListener("click", async () => {
-        ACCOUNT_STATUS_TEXT = api.t("account_status_logging_out");
-        await api.savePartial({
-          accountToken: "",
-          accountUserJson: ""
+      root.querySelectorAll("[data-connection-retry]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const kind = String(button.dataset.connectionRetry || "");
+          if (kind === "sb") await api.send({ type: "SB_RETRY" });
+          if (kind === "obs") await api.send({ type: "OBS_RETRY" });
+          setTimeout(() => api.refreshConnectionStatuses?.(), 150);
         });
       });
 
-      root.querySelector("#btnAccountGoogle")?.addEventListener("click", () => {
-        const statusEl = root.querySelector("#accountStatus");
-        (async () => {
-          try {
-            if (statusEl) statusEl.textContent = "Google Login wird im Browser gestartet...";
-            const res = await api.send({
-              type: "START_GOOGLE_AUTH",
-              baseUrl: root.querySelector("#websiteApiUrl")?.value || ""
-            });
-            if (!res?.ok) throw new Error(res?.error || "Google Login fehlgeschlagen");
-            ACCOUNT_STATUS_TEXT = api.t("account_status_logged_in", { name: res?.user?.username || "?" });
-            scope.AD_SB_MAIN_SETTINGS.sync(api, res?.settings || api.getSettings?.() || {});
-          } catch (e) {
-            ACCOUNT_STATUS_TEXT = String(e?.message || e);
-            scope.AD_SB_MAIN_SETTINGS.sync(api, api.getSettings?.() || {});
-          }
-        })();
-      });
-
-      root.querySelector("#btnOpenWebsiteAccount")?.addEventListener("click", () => {
-        const url = api.getWebsiteAccountUrl();
-        if (chrome?.tabs?.create) {
-          chrome.tabs.create({ url });
-          return;
+      root.querySelector("#settingsAddWledControllerBtn")?.addEventListener("click", async () => {
+        const wledMod = scope.AD_SB_MODULES?.wled;
+        if (typeof wledMod?.appendControllerFromSettings === "function") {
+          await wledMod.appendControllerFromSettings(api);
         }
-        window.open(url, "_blank");
       });
 
       root.querySelector("#btnLoadIni")?.addEventListener("click", () => {
@@ -335,44 +225,59 @@
         }
       });
 
+      const mirrorCtl = scope.AD_SB_WORKER_MIRROR_UI?.install?.({
+        rootDoc: document,
+        mode: "overlay",
+        settingsPageRoot: root,
+        mountTarget: document.body,
+        getSettings: () => api.getSettings?.() || {},
+        savePartial: (partial) => api.savePartial(partial),
+        t: (key, vars) => api.t(key, vars),
+        applyI18n: () => {
+          try {
+            window.__ADM_APPLY_I18N__?.();
+          } catch {
+            // ignore
+          }
+        }
+      });
+      scope.__admMirrorCtl = mirrorCtl;
+
       api.bindAuto(root, "uiLanguage", "uiLanguage", "text");
-      api.bindAuto(root, "onlyMyThrows", "onlyMyThrows");
-      api.bindAuto(root, "myPlayerIndex", "myPlayerIndex", "number");
-      api.bindAuto(root, "debugAllLogs", "debugAllLogs");
-      api.bindAuto(root, "debugActions", "debugActions");
-      api.bindAuto(root, "debugObs", "debugObs");
-      api.bindAuto(root, "debugGameEvents", "debugGameEvents");
     },
     sync(api, settings) {
       const root = api.root;
       const s = settings || {};
-      api.setValue(root, "websiteApiUrl", s.websiteApiUrl || DEFAULT_WEBSITE_API_URL);
       api.setValue(root, "uiLanguage", String(s.uiLanguage || "de").toLowerCase() === "en" ? "en" : "de");
-      api.setChecked(root, "onlyMyThrows", !!s.onlyMyThrows);
-      api.setValue(root, "myPlayerIndex", Number.isFinite(s.myPlayerIndex) ? s.myPlayerIndex : 0);
-      api.setChecked(root, "debugAllLogs", !!s.debugAllLogs);
-      api.setChecked(root, "debugActions", !!s.debugActions);
-      api.setChecked(root, "debugObs", !!s.debugObs);
-      api.setChecked(root, "debugGameEvents", !!s.debugGameEvents);
+
+      api.setChecked(root, "settingsObsEnabled", s.obsEnabled !== false);
+      api.setChecked(root, "settingsSbEnabled", s.sbEnabled !== false);
+      api.setValue(root, "settingsObsUrl", s.obsUrl || "");
+      api.setValue(root, "settingsObsPassword", s.obsPassword || "");
+      api.setValue(root, "settingsSbUrl", s.sbUrl || "");
+      api.setValue(root, "settingsSbPassword", s.sbPassword || "");
+      api.setValue(root, "settingsActionPrefix", String(s.actionPrefix || "").trim());
+
+      const connectionGrid = root.querySelector("#settingsConnectionGrid");
+      if (connectionGrid) {
+        connectionGrid.dataset.connectionsOpen = "true";
+        const visibleCount = Array.from(connectionGrid.querySelectorAll("[data-connection-kind]")).filter((node) => {
+          const kind = String(node.dataset.connectionKind || "");
+          return kind === "obs" ? s.obsEnabled !== false : s.sbEnabled !== false;
+        }).length;
+        connectionGrid.classList.toggle("compactSingle", visibleCount <= 1);
+      }
+
+      try {
+        scope.__admMirrorCtl?.applyWorkerMirrorTiersToDom?.(s.workerMirrorCatTiers);
+      } catch {
+        // ignore
+      }
 
       const statusEl = root.querySelector("#iniStatus");
       if (statusEl && !statusEl.textContent) statusEl.textContent = api.t("status_idle");
 
-      const accountStatusEl = root.querySelector("#accountStatus");
-      if (accountStatusEl) {
-        if (ACCOUNT_STATUS_TEXT) {
-          accountStatusEl.textContent = ACCOUNT_STATUS_TEXT;
-        } else {
-          try {
-            const user = s.accountUserJson ? JSON.parse(String(s.accountUserJson || "")) : null;
-            accountStatusEl.textContent = user
-              ? api.t("account_status_logged_in", { name: user.username || user.email || "?" })
-              : api.t("account_status_logged_out");
-          } catch {
-            accountStatusEl.textContent = api.t("account_status_logged_out");
-          }
-        }
-      }
+      api.refreshConnectionStatuses?.();
     }
   };
 })(window);

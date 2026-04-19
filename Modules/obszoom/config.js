@@ -8,6 +8,14 @@
       obsZoomTargetSource: "",
       obsZoomDurationMs: 450,
       obsZoomStrength: 150,
+      /** Zoom-% für Kalibrierung (100 = aktuelle OBS-Skalierung der Quelle). */
+      obsZoomCalibZoomPercent: 100,
+      /** JSON: Record<filterName, { nx, ny }> — Legacy; Canvas-Modus nutzt obsZoomCalibCanvasPointJson. */
+      obsZoomCalibPointsJson: "{}",
+      /** JSON: { nx, ny } | {} — Klick auf Programm-Canvas (0–1). */
+      obsZoomCalibCanvasPointJson: "{}",
+      /** JSON: Board-Kalibrierung { fitted, cx, cy, R, rot } — 0–1 / rad; R = Radius bis Triple-Ring; rot = Zusatzrotation. */
+      obsZoomBoardCalibJson: "{}",
       obsZoomEffectsJson: "[]",
       checkoutTriggerThreshold: 170,
       obsZoomMoveEasingType: 3,
@@ -17,7 +25,9 @@
       obsZoomIncludeTriples: true,
       obsZoomLastTestTrigger: "T20",
       obsZoomPlayerFilterMode: "all",
-      obsZoomPlayerNamesList: ""
+      obsZoomPlayerNamesList: "",
+      /** Kalibrier-Vorschau: true = Screenshot der Ziel-Quelle (voll), false = Programm-Canvas (PGM). */
+      obsZoomCalibPreviewFromSource: false
     },
     actionDefaults: {
       checkout: "Checkout"
@@ -26,11 +36,13 @@
       togglesBool: [
         "obsZoomIncludeSingles",
         "obsZoomIncludeDoubles",
-        "obsZoomIncludeTriples"
+        "obsZoomIncludeTriples",
+        "obsZoomCalibPreviewFromSource"
       ],
       togglesNumber: {
         obsZoomDurationMs: 450,
         obsZoomStrength: 150,
+        obsZoomCalibZoomPercent: 100,
         checkoutTriggerThreshold: 170,
         obsZoomMoveEasingType: 3,
         obsZoomMoveEasingFunction: 2
@@ -40,6 +52,9 @@
         obsZoomSceneName: "",
         obsZoomTargetSource: "",
         obsZoomEffectsJson: "[]",
+        obsZoomCalibPointsJson: "{}",
+        obsZoomCalibCanvasPointJson: "{}",
+        obsZoomBoardCalibJson: "{}",
         obsZoomPlayerFilterMode: "all",
         obsZoomPlayerNamesList: ""
       }

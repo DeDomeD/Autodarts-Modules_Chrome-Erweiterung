@@ -1,20 +1,20 @@
 /**
- * Website Design Engine (Module)
+ * Themes engine (Autodarts play.autodarts.io)
  * Responsibility:
- * - reads website design settings from chrome.storage
+ * - reads theme settings from chrome.storage
  * - resolves theme from Horizontal/Vertical config sets
  * - applies CSS through local style + background scripting API
  */
 (() => {
-console.log("[Autodarts Modules] websitedesign content loaded");
-
 let WEBSITE_THEME_STATE = {
   enabled: false,
   layout: "horizontal",
   theme: "classic",
   arenaPrimaryHue: 210,
   arenaSecondaryHue: 155,
-  dartboardGlowEnabled: true
+  dartboardGlowEnabled: true,
+  backgroundImageData: "",
+  backgroundSize: "cover"
 };
 let WEBSITE_THEME_REAPPLY_TIMER = null;
 let SELECTED_MARKER_OBSERVER = null;
@@ -31,11 +31,15 @@ const MENU_PARENT_STYLE_BACKUP = new WeakMap();
 const BUILDER_SAVE_BUTTON_ID = "ad-sb-theme-builder-save";
 const BUILDER_PICKER_TOGGLE_BUTTON_ID = "ad-sb-theme-builder-picker-toggle";
 const BUILDER_RESET_BUTTON_ID = "ad-sb-theme-builder-reset";
+const BUILDER_PIN_BUTTON_ID = "ad-sb-theme-builder-pin-toggle";
+const BUILDER_PIN_PANEL_ID = "ad-sb-theme-builder-pin-panel";
 const BUILDER_BOX_ID = "ad-sb-theme-builder-box";
 const BUILDER_HANDLE_ID = "ad-sb-theme-builder-handle";
+const BUILDER_ROTATE_HANDLE_ID = "ad-sb-theme-builder-rotate";
 const BUILDER_STYLE_ID = "ad-sb-theme-builder-style";
 const BUILDER_DIALOG_ID = "ad-sb-theme-builder-dialog";
 const BUILDER_PICKER_ID = "ad-sb-theme-builder-picker";
+const BUILDER_HINT_ID = "ad-sb-theme-builder-hint";
 const DARTBOARD_GLOW_TARGET_KEY = "dartboard-glow";
 let BUILDER_ACTIVE = false;
 let BUILDER_SESSION_ACTIVE = false;
@@ -44,11 +48,13 @@ let BUILDER_SELECTED = null;
 let BUILDER_SELECTED_SELECTOR = "";
 let BUILDER_DRAG = null;
 let BUILDER_RESIZE = null;
+let BUILDER_ROTATE_DRAG = null;
 let BUILDER_TARGETS = [];
 let BUILDER_HISTORY = [];
 let BUILDER_HISTORY_INDEX = -1;
 let BUILDER_SESSION_SNAPSHOT = {};
 let BUILDER_PICKER_OPEN = false;
+let BUILDER_PIN_OPEN = false;
 const BUILDER_TARGET_KEYS = [
   { key: "dartboard", label: "Dartscheibe" },
   { key: "points-table-left", label: "Punktetafel links" },
@@ -64,6 +70,9 @@ const BUILDER_TARGET_KEYS = [
   { key: "player-score-left", label: "Score links" },
   { key: "player-score-right", label: "Score rechts" },
   { key: "throw-total", label: "Gesamtpunkte" },
+  { key: "throw-track", label: "Wurf-Leiste (BullOff)" },
+  { key: "dartboard-animations", label: "Scheibe Animationen" },
+  { key: "dartboard-mount", label: "Scheibe Rahmen" },
   { key: "throw-point-1", label: "Punktfeld 1" },
   { key: "throw-point-2", label: "Punktfeld 2" },
   { key: "throw-point-3", label: "Punktfeld 3" },
@@ -71,6 +80,42 @@ const BUILDER_TARGET_KEYS = [
   { key: "action-next", label: "Next" }
 ];
 const BUILDER_DEFAULT_ALIGNMENT_THEMES = new Set(["classic", "hue", "minimal"]);
+
+function parseThemeBuilderTargets(raw) {
+  try {
+    const arr = JSON.parse(String(raw || "[]"));
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((x) => x && typeof x === "object")
+      .map((x) => ({
+        key: String(x.key || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, "")
+          .slice(0, 48),
+        label: String(x.label || x.key || "").trim().slice(0, 80) || String(x.key || "").trim(),
+        selector: String(x.selector || "").trim()
+      }))
+      .filter((x) => x.key && x.selector);
+  } catch {
+    return [];
+  }
+}
+
+/** Basis-Ziele plus aus Einstellungen (`websiteThemeBuilderTargets`) */
+function getEffectiveBuilderTargetKeys() {
+  const extra = Array.isArray(WEBSITE_THEME_STATE.themeBuilderTargets) ? WEBSITE_THEME_STATE.themeBuilderTargets : [];
+  const byKey = new Map();
+  BUILDER_TARGET_KEYS.forEach((t) => byKey.set(t.key, { ...t }));
+  extra.forEach((t) => {
+    if (!t?.key) return;
+    const key = String(t.key).trim().toLowerCase();
+    const label = String(t.label || key).trim() || key;
+    byKey.set(key, { key, label });
+  });
+  return Array.from(byKey.values());
+}
+
 const MENU_LOGO_INLINE_SVG = `
   <svg viewBox="0 0 500 500" aria-hidden="true" focusable="false">
     <g clip-path="url(#adSbClip)">
@@ -155,6 +200,7 @@ function normalizeTheme(layout, rawTheme, stateRef = WEBSITE_THEME_STATE) {
   const themes = getThemeSetsFromState(stateRef)[layout] || [];
   let wanted = String(rawTheme || "").toLowerCase();
   if (wanted === "arena") wanted = "hue";
+  if (wanted === "tools-glass") wanted = "stream-glass";
   if (themes.some((t) => t.id === wanted)) return wanted;
   return themes[0]?.id || "";
 }
@@ -177,8 +223,20 @@ function normalizeWebsiteThemeSettings(settings) {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object") builderData = parsed;
   } catch {}
+  const bgSizeRaw = String(s.websiteBackgroundSize || "cover").toLowerCase();
+  const backgroundSize =
+    bgSizeRaw === "contain" || bgSizeRaw === "auto" ? bgSizeRaw : "cover";
+  const themesInstalled =
+    Array.isArray(s.installedModules) &&
+    s.installedModules.some((id) => {
+      const x = String(id || "").toLowerCase();
+      return x === "themes" || x === "websitedesign";
+    });
+  const themesOn =
+    s.themesEnabled !== false &&
+    (s.themesEnabled === true || s.websiteDesignEnabled === true || themesInstalled);
   return {
-    enabled: !!s.websiteDesignEnabled,
+    enabled: themesOn,
     layout,
     theme,
     arenaPrimaryHue: clampHue(s.websiteArenaPrimaryHue, 210),
@@ -187,8 +245,35 @@ function normalizeWebsiteThemeSettings(settings) {
     builderEnabled: !!s.websiteThemeBuilderEnabled,
     builderData,
     customThemesHorizontal,
-    customThemesVertical
+    customThemesVertical,
+    themeBuilderTargets: parseThemeBuilderTargets(s.websiteThemeBuilderTargets),
+    backgroundImageData: String(s.websiteBackgroundImageData || "").trim(),
+    backgroundSize
   };
+}
+
+function buildCustomBackgroundCss(cfg) {
+  const raw = String(cfg?.backgroundImageData || "").trim();
+  if (!raw) return "";
+  const dataUrl = raw.startsWith("data:") ? raw : `data:image/jpeg;base64,${raw}`;
+  const sizeRaw = String(cfg?.backgroundSize || "cover").toLowerCase();
+  const size = sizeRaw === "contain" || sizeRaw === "auto" ? sizeRaw : "cover";
+  let urlLit = "";
+  try {
+    urlLit = JSON.stringify(dataUrl);
+  } catch {
+    return "";
+  }
+  return `
+    html{min-height:100% !important;}
+    body{
+      background-image:url(${urlLit}) !important;
+      background-size:${size} !important;
+      background-position:center center !important;
+      background-repeat:no-repeat !important;
+      background-attachment:fixed !important;
+    }
+  `;
 }
 
 function buildThemeCss(cfg) {
@@ -293,11 +378,13 @@ function buildThemeCss(cfg) {
   const themeCfg = findTheme(cfg.layout, cfg.theme);
   const layoutCss = cfg.layout === "vertical" ? verticalLayout : horizontalLayout;
   const themeCss = String(themeCfg?.css || "");
+  const customBg = buildCustomBackgroundCss(cfg);
 
   return `
     ${shared}
     ${layoutCss}
     ${themeCss}
+    ${customBg}
   `;
 }
 
@@ -681,6 +768,37 @@ function getOrCreateBuilderStyle() {
       font-weight:700;
       cursor:pointer;
     }
+    #${BUILDER_PIN_BUTTON_ID}{
+      position:fixed;
+      top:144px;
+      right:12px;
+      z-index:2147483647;
+      border:1px solid rgba(255,255,255,.24);
+      background:rgba(8,14,24,.88);
+      color:#fff;
+      border-radius:10px;
+      padding:8px 10px;
+      font-weight:700;
+      cursor:pointer;
+      max-width:calc(100vw - 24px);
+    }
+    #${BUILDER_HINT_ID}{
+      position:fixed;
+      left:12px;
+      bottom:12px;
+      z-index:2147483646;
+      max-width:min(360px, calc(100vw - 24px));
+      padding:10px 12px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.2);
+      background:rgba(8,14,24,.9);
+      color:rgba(255,255,255,.88);
+      font-size:11px;
+      line-height:1.45;
+      pointer-events:none;
+      white-space:pre-line;
+      box-shadow:0 4px 18px rgba(0,0,0,.35);
+    }
     #${BUILDER_BOX_ID}{
       position:fixed;
       z-index:2147483646;
@@ -701,6 +819,18 @@ function getOrCreateBuilderStyle() {
       background:#19c7ff;
       pointer-events:auto;
       cursor:nwse-resize;
+    }
+    #${BUILDER_ROTATE_HANDLE_ID}{
+      position:absolute;
+      left:-6px;
+      top:-6px;
+      width:12px;
+      height:12px;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.9);
+      background:#ffb020;
+      pointer-events:auto;
+      cursor:grab;
     }
     [data-ad-sb-builder-hit="1"]{
       outline:1px dashed rgba(140,230,255,.55) !important;
@@ -767,7 +897,7 @@ function getOrCreateBuilderStyle() {
     #${BUILDER_PICKER_ID}{
       position:fixed;
       right:12px;
-      top:144px;
+      top:188px;
       z-index:2147483647;
       width:260px;
       max-height:55vh;
@@ -836,6 +966,96 @@ function getOrCreateBuilderStyle() {
       font-size:11px;
       margin-left:6px;
     }
+    #${BUILDER_PIN_PANEL_ID}{
+      position:fixed;
+      right:12px;
+      top:188px;
+      z-index:2147483647;
+      width:280px;
+      max-height:50vh;
+      overflow:auto;
+      border:1px solid rgba(255,255,255,.22);
+      border-radius:12px;
+      background:rgba(8,14,24,.94);
+      color:#fff;
+      padding:10px;
+      display:none;
+      box-shadow:0 18px 48px rgba(0,0,0,.34);
+    }
+    #${BUILDER_PIN_PANEL_ID}[data-open="1"]{
+      display:block;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinHead{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:8px;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinTtl{
+      font-weight:800;
+      font-size:12px;
+      margin:0;
+      opacity:.92;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinClose{
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.06);
+      color:#fff;
+      border-radius:8px;
+      width:28px;
+      height:28px;
+      cursor:pointer;
+      font-weight:700;
+      padding:0;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinRow{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      width:100%;
+      margin-top:6px;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.04);
+      color:#fff;
+      cursor:pointer;
+      text-align:left;
+      font-size:12px;
+      box-sizing:border-box;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinRow:hover{
+      background:rgba(255,255,255,.08);
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinCb{
+      width:16px;
+      height:16px;
+      flex-shrink:0;
+      accent-color:#19c7ff;
+      cursor:pointer;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinLabel{
+      flex:1;
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinLock{
+      font-size:20px;
+      line-height:1;
+      flex-shrink:0;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinLock.on{
+      opacity:1;
+      filter:none;
+    }
+    #${BUILDER_PIN_PANEL_ID} .pinLock.off{
+      opacity:0.4;
+      filter:grayscale(1);
+    }
     html[data-ad-sb-builder-freeze="1"]{
       scroll-behavior:auto !important;
     }
@@ -855,6 +1075,13 @@ function cssEscapeSafe(v) {
 
 function cloneBuilderData(data) {
   try { return JSON.parse(JSON.stringify(data || {})); } catch { return {}; }
+}
+
+/** Glow folgt der Scheibe — nicht als eigenes Layout-Objekt speichern */
+function stripDartboardGlowFromBuilderData(data) {
+  const c = cloneBuilderData(data);
+  delete c[DARTBOARD_GLOW_TARGET_KEY];
+  return c;
 }
 
 function commitBuilderHistorySnapshot() {
@@ -925,13 +1152,15 @@ function normalizeBuilderPickElement(node) {
 
 function isBuilderUiTarget(node) {
   if (!isBuilderElement(node)) return false;
-  if (node.id === BUILDER_SAVE_BUTTON_ID || node.id === BUILDER_PICKER_TOGGLE_BUTTON_ID || node.id === BUILDER_RESET_BUTTON_ID || node.id === BUILDER_BOX_ID || node.id === BUILDER_HANDLE_ID) return true;
+  if (node.id === BUILDER_SAVE_BUTTON_ID || node.id === BUILDER_PICKER_TOGGLE_BUTTON_ID || node.id === BUILDER_RESET_BUTTON_ID || node.id === BUILDER_PIN_BUTTON_ID || node.id === BUILDER_BOX_ID || node.id === BUILDER_HANDLE_ID || node.id === BUILDER_ROTATE_HANDLE_ID) return true;
   if (node.closest(`#${BUILDER_SAVE_BUTTON_ID}`)) return true;
   if (node.closest(`#${BUILDER_PICKER_TOGGLE_BUTTON_ID}`)) return true;
   if (node.closest(`#${BUILDER_RESET_BUTTON_ID}`)) return true;
+  if (node.closest(`#${BUILDER_PIN_BUTTON_ID}`)) return true;
   if (node.closest(`#${BUILDER_BOX_ID}`)) return true;
   if (node.closest(`#${BUILDER_DIALOG_ID}`)) return true;
   if (node.closest(`#${BUILDER_PICKER_ID}`)) return true;
+  if (node.closest(`#${BUILDER_PIN_PANEL_ID}`)) return true;
   if (node.closest(`#${MENU_TOGGLE_BUTTON_ID}`)) return true;
   return false;
 }
@@ -948,6 +1177,9 @@ function clearBuilderTargetMarks() {
     delete el.dataset.adSbBuilderTarget;
     delete el.dataset.adSbBuilderKey;
   });
+  document.querySelectorAll("[data-ad-sb-builder-companion-for]").forEach((el) => {
+    delete el.dataset.adSbBuilderCompanionFor;
+  });
 }
 
 function ensureBuilderPickerPanel() {
@@ -957,7 +1189,7 @@ function ensureBuilderPickerPanel() {
     panel.id = BUILDER_PICKER_ID;
     (document.body || document.documentElement).appendChild(panel);
   }
-  const rows = BUILDER_TARGET_KEYS.map((t) => {
+  const rows = getEffectiveBuilderTargetKeys().map((t) => {
     const has = BUILDER_TARGETS.some((x) => x.key === t.key) || !!BUILDER_DATA?.[t.key]?.sel;
     return `
       <div class="row">
@@ -987,12 +1219,90 @@ function updateBuilderPickerVisibility() {
   if (btn) btn.textContent = BUILDER_PICKER_OPEN ? "Ziele schliessen" : "Ziele festlegen";
 }
 
+function updateBuilderPinVisibility() {
+  const panel = document.getElementById(BUILDER_PIN_PANEL_ID);
+  if (panel) panel.dataset.open = BUILDER_PIN_OPEN ? "1" : "0";
+  const btn = document.getElementById(BUILDER_PIN_BUTTON_ID);
+  if (btn) btn.textContent = BUILDER_PIN_OPEN ? "Feststellen ▴" : "Feststellen ▾";
+}
+
+function isBuilderTargetLocked(key) {
+  const k = String(key || "");
+  if (!k) return false;
+  return !!getBuilderEntry(k)?.locked;
+}
+
+function escapeHtmlAttr(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+}
+
+function ensureBuilderPinPanel() {
+  let panel = document.getElementById(BUILDER_PIN_PANEL_ID);
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = BUILDER_PIN_PANEL_ID;
+    (document.body || document.documentElement).appendChild(panel);
+    panel.addEventListener("change", (ev) => {
+      const inp = ev.target;
+      if (!inp || !inp.matches || !inp.matches("input.pinCb")) return;
+      const k = String(inp.getAttribute("data-builder-pin-key") || "").trim();
+      if (!k) return;
+      const entry = getBuilderEntry(k);
+      entry.locked = !!inp.checked;
+      commitBuilderHistorySnapshot();
+      ensureBuilderPinPanel();
+      updateBuilderPinVisibility();
+      if (BUILDER_SELECTED_SELECTOR === k) refreshBuilderSelectionBox();
+      try {
+        saveBuilderDataToSettings();
+      } catch {}
+    });
+  }
+  const rows = getEffectiveBuilderTargetKeys()
+    .map((t) => {
+      const locked = isBuilderTargetLocked(t.key);
+      const ico = locked ? "🔒" : "🔓";
+      const cls = locked ? "pinLock on" : "pinLock off";
+      const lab = escapeHtmlAttr(t.label);
+      return `
+      <label class="pinRow" title="Sperrt Verschieben, Größe, Drehen und Tasten-Anpassungen">
+        <input type="checkbox" class="pinCb" data-builder-pin-key="${t.key}" ${locked ? "checked" : ""} />
+        <span class="pinLabel">${lab}</span>
+        <span class="${cls}" aria-hidden="true">${ico}</span>
+      </label>`;
+    })
+    .join("");
+  panel.dataset.open = BUILDER_PIN_OPEN ? "1" : "0";
+  panel.innerHTML = `
+    <div class="pinHead">
+      <div class="pinTtl">Elemente sperren</div>
+      <button type="button" class="pinClose" data-builder-pin-close="1" aria-label="Schliessen">X</button>
+    </div>
+    ${rows}
+  `;
+  panel.querySelector("[data-builder-pin-close='1']")?.addEventListener("click", () => {
+    BUILDER_PIN_OPEN = false;
+    updateBuilderPinVisibility();
+  });
+}
+
 function registerBuilderTarget(key, el, kind) {
   if (!key || !isBuilderElement(el)) return;
   if (BUILDER_TARGETS.some((t) => t.key === key)) return;
   el.dataset.adSbBuilderTarget = "1";
   el.dataset.adSbBuilderKey = key;
   BUILDER_TARGETS.push({ key, el, kind: kind || "generic" });
+}
+
+/** Gleiche BUILDER_TARGETS-Liste, aber kein Klick-Ziel (Klicks landen auf `masterKey`) */
+function registerBuilderCompanionTarget(key, el, masterKey, kind) {
+  if (!key || !masterKey || !isBuilderElement(el)) return;
+  if (BUILDER_TARGETS.some((t) => t.key === key)) return;
+  el.dataset.adSbBuilderCompanionFor = masterKey;
+  BUILDER_TARGETS.push({ key, el, kind: kind || "companion", masterKey });
 }
 
 function buildElementSelector(el) {
@@ -1020,6 +1330,17 @@ function buildElementSelector(el) {
 function normalizeTargetElementForKey(key, el) {
   if (!key || !isBuilderElement(el)) return el;
   if (key !== "player-score-left" && key !== "player-score-right") return el;
+
+  // BullOff / ext: beide Spieler liegen unter #ad-ext-player-display — nicht zum gemeinsamen Parent hochklettern
+  const extWrap = document.querySelector("#ad-ext-player-display");
+  if (isBuilderElement(extWrap) && extWrap.contains(el)) {
+    let cur = el;
+    while (cur && cur !== extWrap && cur.parentElement) {
+      if (cur.parentElement === extWrap) return cur;
+      cur = cur.parentElement;
+    }
+  }
+
   let best = el;
   let cur = el;
   for (let i = 0; i < 7 && cur; i += 1) {
@@ -1130,10 +1451,66 @@ function detectDartboardTarget() {
     registerBuilderTarget("dartboard", best, "board");
     const glow = detectDartboardGlowCompanion(best);
     if (glow) {
-      registerBuilderTarget(DARTBOARD_GLOW_TARGET_KEY, glow, "board-glow");
+      registerBuilderCompanionTarget(DARTBOARD_GLOW_TARGET_KEY, glow, "dartboard", "board-glow");
       glow.dataset.adSbDartboardGlow = "1";
     }
   }
+  registerDartboardShellTargets();
+}
+
+/** BullOff / ähnlich: Animations-Wrapper und äußerer Rahmen um die registrierte Scheibe */
+function registerDartboardShellTargets() {
+  const board = getTargetByKey("dartboard")?.el;
+  if (!isBuilderElement(board)) return;
+
+  if (!getTargetByKey("dartboard-animations")) {
+    const shell = board.closest(".showAnimations");
+    if (isBuilderElement(shell) && shell !== board) {
+      registerBuilderTarget("dartboard-animations", shell, "dartboard-fx");
+    }
+  }
+
+  if (!getTargetByKey("dartboard-mount")) {
+    const inner = getTargetByKey("dartboard-animations")?.el || board;
+    const par = inner.parentElement;
+    if (isBuilderElement(par) && par !== document.body && par.contains(board)) {
+      const r = par.getBoundingClientRect();
+      if (isRectVisible(r) && r.width >= 120 && r.width <= window.innerWidth * 0.98 && r.height >= 100) {
+        registerBuilderTarget("dartboard-mount", par, "dartboard-mount");
+      }
+    }
+  }
+}
+
+/**
+ * BullOff: horizontale Leiste mit Dart-Grafik (`div.score` laut DOM).
+ * Nur wenn noch kein throw-track existiert.
+ */
+function registerBullOffThrowTrack() {
+  if (getTargetByKey("throw-track")) return;
+  const candidates = Array.from(document.querySelectorAll("div.score"));
+  let best = null;
+  let bestScore = -1;
+  for (const node of candidates) {
+    if (!isBuilderElement(node)) continue;
+    const r = node.getBoundingClientRect();
+    if (!isRectVisible(r)) continue;
+    if (r.width < 100 || r.width > window.innerWidth * 0.94) continue;
+    if (r.height < 20 || r.height > 160) continue;
+    const midY = r.top + r.height / 2;
+    if (midY < window.innerHeight * 0.12 || midY > window.innerHeight * 0.65) continue;
+    const dartImg = node.querySelector('img[alt="Dart"], img[alt*="dart" i]');
+    const hasSvg = !!node.querySelector("svg");
+    if (!dartImg && !hasSvg) continue;
+    let score = r.width * r.height;
+    if (dartImg) score += 25_000;
+    if (hasSvg) score += 8000;
+    if (score > bestScore) {
+      bestScore = score;
+      best = node;
+    }
+  }
+  if (best) registerBuilderTarget("throw-track", best, "throw-track-bulloff");
 }
 
 function isAncestor(a, b) {
@@ -1426,6 +1803,7 @@ function refreshBuilderTargets() {
   // 1) Restore from saved selector binding first (deterministic)
   const keys = Object.keys(BUILDER_DATA || {});
   keys.forEach((key) => {
+    if (key === DARTBOARD_GLOW_TARGET_KEY) return;
     const sel = String(BUILDER_DATA?.[key]?.sel || "");
     if (!sel) return;
     let el = null;
@@ -1442,24 +1820,54 @@ function refreshBuilderTargets() {
   detectPointsTables();
   detectScoreSubparts();
   detectThrowBoxes();
+  registerBullOffThrowTrack();
   fillMissingPairedTargets();
-  if (BUILDER_ACTIVE) ensureBuilderPickerPanel();
+
+  // 3) Zusätzliche Ziele aus Einstellungen (nur Keys, die noch nicht gebunden sind)
+  const extras = Array.isArray(WEBSITE_THEME_STATE.themeBuilderTargets) ? WEBSITE_THEME_STATE.themeBuilderTargets : [];
+  extras.forEach((row) => {
+    const key = String(row?.key || "").trim().toLowerCase();
+    if (!key || BUILDER_TARGETS.some((t) => t.key === key)) return;
+    const sel = String(row?.selector || "").trim();
+    if (!sel) return;
+    let el = null;
+    try {
+      el = document.querySelector(sel);
+    } catch {
+      el = null;
+    }
+    if (!isBuilderElement(el)) return;
+    registerBuilderTarget(key, el, "custom");
+  });
+
+  if (BUILDER_ACTIVE) {
+    ensureBuilderPickerPanel();
+    ensureBuilderPinPanel();
+  }
 }
 
 function getBuilderTargetFromNode(node) {
   if (!isBuilderElement(node)) return null;
   const holder = node.closest("[data-ad-sb-builder-target='1']");
-  if (!holder) return null;
-  const key = holder.dataset.adSbBuilderKey || "";
-  if (!key) return null;
-  return BUILDER_TARGETS.find((t) => t.key === key) || null;
+  if (holder) {
+    const key = holder.dataset.adSbBuilderKey || "";
+    if (!key) return null;
+    return BUILDER_TARGETS.find((t) => t.key === key) || null;
+  }
+  const comp = node.closest("[data-ad-sb-builder-companion-for]");
+  if (comp) {
+    const masterKey = String(comp.dataset.adSbBuilderCompanionFor || "").trim();
+    if (!masterKey) return null;
+    return BUILDER_TARGETS.find((t) => t.key === masterKey) || null;
+  }
+  return null;
 }
 
 function getBuilderEntry(selector) {
   const key = String(selector || "");
   if (!key) return null;
   if (!BUILDER_DATA[key]) {
-    BUILDER_DATA[key] = { x: 0, y: 0, w: 0, h: 0, r: 0, sx: 1, sy: 1 };
+    BUILDER_DATA[key] = { x: 0, y: 0, w: 0, h: 0, r: 0, rot: 0, rx: 0, ry: 0, persp: 0, sx: 1, sy: 1, locked: false };
   }
   return BUILDER_DATA[key];
 }
@@ -1552,22 +1960,41 @@ function applyBuilderEntryToElement(el, entry) {
   const sy = Number(entry.sy || 1);
   const safeSx = Number.isFinite(sx) ? Math.max(0.25, Math.min(4.0, sx)) : 1;
   const safeSy = Number.isFinite(sy) ? Math.max(0.25, Math.min(4.0, sy)) : 1;
-  el.style.setProperty("transform-origin", "top left", "important");
-  el.style.setProperty("transform", `scale(${safeSx}, ${safeSy})`, "important");
+  // Immer gleichmäßig skalieren (Scheibe rund, keine unabhängigen X/Y-Streckungen)
+  const uScale = Math.sqrt(Math.max(0.0625, safeSx * safeSy));
+  const rot = Number(entry.rot || 0);
+  const safeRot = Number.isFinite(rot) ? rot : 0;
+  const rx = Number(entry.rx || 0);
+  const ry = Number(entry.ry || 0);
+  const safeRx = Number.isFinite(rx) ? Math.max(-42, Math.min(42, rx)) : 0;
+  const safeRy = Number.isFinite(ry) ? Math.max(-42, Math.min(42, ry)) : 0;
+  let persp = Number(entry.persp || 0);
+  if (!Number.isFinite(persp) || persp <= 0) persp = 1000;
+  persp = Math.round(Math.max(220, Math.min(2800, persp)));
+  const has3d = Math.abs(safeRx) > 0.04 || Math.abs(safeRy) > 0.04;
+  el.style.setProperty("transform-origin", has3d ? "center center" : "top left", "important");
+  if (has3d) {
+    el.style.setProperty("transform-style", "preserve-3d", "important");
+    el.style.setProperty(
+      "transform",
+      `perspective(${persp}px) rotateX(${safeRx}deg) rotateY(${safeRy}deg) rotate(${safeRot}deg) scale(${uScale}, ${uScale})`,
+      "important"
+    );
+  } else {
+    el.style.removeProperty("transform-style");
+    el.style.setProperty("transform", `rotate(${safeRot}deg) scale(${uScale}, ${uScale})`, "important");
+  }
   if ((entry.r || 0) >= 0) el.style.setProperty("border-radius", `${Math.round(entry.r)}px`, "important");
   // Keep moved elements above overlapping siblings so large score numbers stay visible while editing.
   el.style.setProperty("z-index", "42", "important");
-}
 
-function applyBuilderOffsetOnly(el, entry) {
-  if (!el || !entry) return;
-  if (!el.dataset.adSbBuilderOriginalStyle) {
-    el.dataset.adSbBuilderOriginalStyle = el.getAttribute("style") || "";
+  const boardEl = getTargetByKey("dartboard")?.el;
+  if (boardEl && el === boardEl) {
+    const glowEl = getTargetByKey(DARTBOARD_GLOW_TARGET_KEY)?.el;
+    if (isBuilderElement(glowEl) && glowEl !== el) {
+      applyBuilderEntryToElement(glowEl, entry);
+    }
   }
-  el.dataset.adSbBuilderApplied = "1";
-  el.style.setProperty("position", "relative", "important");
-  el.style.setProperty("left", `${Math.round(entry.x || 0)}px`, "important");
-  el.style.setProperty("top", `${Math.round(entry.y || 0)}px`, "important");
 }
 
 function clearBuilderAppliedStyles() {
@@ -1587,7 +2014,8 @@ function clearBuilderAppliedStyles() {
 function cleanupOrphanBuilderAppliedStyles() {
   const nodes = document.querySelectorAll("[data-ad-sb-builder-applied='1']");
   nodes.forEach((el) => {
-    const key = String(el.dataset.adSbBuilderKey || "");
+    let key = String(el.dataset.adSbBuilderKey || "");
+    if (!key && el.dataset.adSbDartboardGlow === "1") key = "dartboard";
     if (!key || !BUILDER_DATA?.[key]) {
       const orig = el.dataset.adSbBuilderOriginalStyle;
       if (orig !== undefined) {
@@ -1606,6 +2034,7 @@ function applyBuilderDataToDom() {
   cleanupOrphanBuilderAppliedStyles();
   const entries = BUILDER_DATA || {};
   Object.keys(entries).forEach((key) => {
+    if (key === DARTBOARD_GLOW_TARGET_KEY) return;
     const entry = entries[key];
     if (!entry || typeof entry !== "object") return;
     const target = BUILDER_TARGETS.find((t) => t.key === key);
@@ -1625,13 +2054,12 @@ function applyBuilderDataToDom() {
     const boardEl = getTargetByKey("dartboard")?.el || null;
     const foundGlow = boardEl ? detectDartboardGlowCompanion(boardEl) : null;
     if (foundGlow) {
-      registerBuilderTarget(DARTBOARD_GLOW_TARGET_KEY, foundGlow, "board-glow");
+      registerBuilderCompanionTarget(DARTBOARD_GLOW_TARGET_KEY, foundGlow, "dartboard", "board-glow");
       foundGlow.dataset.adSbDartboardGlow = "1";
       glowTarget = getTargetByKey(DARTBOARD_GLOW_TARGET_KEY);
     }
   }
   if (glowTarget?.el) {
-    if (boardEntry) applyBuilderOffsetOnly(glowTarget.el, boardEntry);
     glowTarget.el.style.setProperty("pointer-events", "none", "important");
     glowTarget.el.dataset.adSbDartboardGlow = "1";
     if (WEBSITE_THEME_STATE?.dartboardGlowEnabled === false) {
@@ -1650,10 +2078,17 @@ function ensureBuilderOverlay() {
   if (!box) {
     box = document.createElement("div");
     box.id = BUILDER_BOX_ID;
+    const rotHandle = document.createElement("div");
+    rotHandle.id = BUILDER_ROTATE_HANDLE_ID;
+    box.appendChild(rotHandle);
     const handle = document.createElement("div");
     handle.id = BUILDER_HANDLE_ID;
     box.appendChild(handle);
     (document.body || document.documentElement).appendChild(box);
+  } else if (!box.querySelector(`#${BUILDER_ROTATE_HANDLE_ID}`)) {
+    const rotHandle = document.createElement("div");
+    rotHandle.id = BUILDER_ROTATE_HANDLE_ID;
+    box.insertBefore(rotHandle, box.firstChild);
   }
   return box;
 }
@@ -1662,6 +2097,8 @@ function refreshBuilderSelectionBox() {
   const box = ensureBuilderOverlay();
   if (!BUILDER_ACTIVE || !BUILDER_SELECTED || !document.contains(BUILDER_SELECTED)) {
     box.style.display = "none";
+    box.style.removeProperty("border-color");
+    box.style.removeProperty("border-style");
     return;
   }
   const r = BUILDER_SELECTED.getBoundingClientRect();
@@ -1670,6 +2107,13 @@ function refreshBuilderSelectionBox() {
   box.style.top = `${Math.round(r.top)}px`;
   box.style.width = `${Math.max(10, Math.round(r.width))}px`;
   box.style.height = `${Math.max(10, Math.round(r.height))}px`;
+  if (isBuilderTargetLocked(BUILDER_SELECTED_SELECTOR)) {
+    box.style.setProperty("border-color", "rgba(255, 186, 120, 0.98)", "important");
+    box.style.setProperty("border-style", "solid", "important");
+  } else {
+    box.style.removeProperty("border-color");
+    box.style.removeProperty("border-style");
+  }
 }
 
 function saveBuilderDataToSettings() {
@@ -1677,7 +2121,7 @@ function saveBuilderDataToSettings() {
     if (!chrome?.storage?.local) return;
     chrome.storage.local.get(["settings"], (items) => {
       const settings = items?.settings || {};
-      settings.websiteThemeBuilderData = JSON.stringify(BUILDER_DATA || {});
+      settings.websiteThemeBuilderData = JSON.stringify(stripDartboardGlowFromBuilderData(BUILDER_DATA || {}));
       chrome.storage.local.set({ settings });
     });
   } catch {}
@@ -1689,9 +2133,11 @@ function resetBuilderToDefaults() {
   BUILDER_SELECTED_SELECTOR = "";
   BUILDER_DRAG = null;
   BUILDER_RESIZE = null;
+  BUILDER_ROTATE_DRAG = null;
   clearBuilderAppliedStyles();
   refreshBuilderTargets();
   ensureBuilderPickerPanel();
+  ensureBuilderPinPanel();
   commitBuilderHistorySnapshot();
   refreshBuilderSelectionBox();
 }
@@ -1763,7 +2209,7 @@ function showBuilderSaveDialog() {
     if (!label || (!useH && !useV)) return;
 
     const idBase = `custom-${slugifyThemeName(label)}`;
-    const snapshot = JSON.parse(JSON.stringify(BUILDER_DATA || {}));
+    const snapshot = stripDartboardGlowFromBuilderData(BUILDER_DATA || {});
 
     try {
       chrome.storage.local.get(["settings"], (items) => {
@@ -1823,14 +2269,22 @@ function setBuilderActive(active) {
     if (dlg) dlg.remove();
     const picker = document.getElementById(BUILDER_PICKER_ID);
     if (picker) picker.remove();
+    const pinBtn = document.getElementById(BUILDER_PIN_BUTTON_ID);
+    if (pinBtn) pinBtn.remove();
+    const pinPanel = document.getElementById(BUILDER_PIN_PANEL_ID);
+    if (pinPanel) pinPanel.remove();
+    const hintEl = document.getElementById(BUILDER_HINT_ID);
+    if (hintEl) hintEl.remove();
     document.querySelectorAll("[data-ad-sb-builder-hit='1']").forEach((el) => delete el.dataset.adSbBuilderHit);
     BUILDER_SELECTED = null;
     BUILDER_SELECTED_SELECTOR = "";
     BUILDER_DRAG = null;
     BUILDER_RESIZE = null;
+    BUILDER_ROTATE_DRAG = null;
     BUILDER_HISTORY = [];
     BUILDER_HISTORY_INDEX = -1;
     BUILDER_PICKER_OPEN = false;
+    BUILDER_PIN_OPEN = false;
     return;
   }
 
@@ -1851,28 +2305,61 @@ function setBuilderActive(active) {
     btn.addEventListener("click", () => showBuilderSaveDialog());
     (document.body || document.documentElement).appendChild(btn);
   }
+  if (!document.getElementById(BUILDER_HINT_ID)) {
+    const hint = document.createElement("div");
+    hint.id = BUILDER_HINT_ID;
+    hint.textContent =
+      "Kurztasten (Element wählen):\n"
+      + "[ / ]  Eckenrundung\n"
+      + "Alt + Pfeiltasten  3D-Neigung (oben/unten = X, links/rechts = Y)\n"
+      + "Alt + Bild↑ / Bild↓  Perspektive (Tiefe)\n"
+      + "Shift + Alt + Pfeil  größerer Schritt\n"
+      + "Strg+Z Rückgängig · Esc Builder beenden\n"
+      + "Oben rechts: Feststellen — Elemente sperren (Checkbox + Schloss)";
+    (document.body || document.documentElement).appendChild(hint);
+  }
   if (!document.getElementById(BUILDER_PICKER_TOGGLE_BUTTON_ID)) {
     const pickerBtn = document.createElement("button");
     pickerBtn.id = BUILDER_PICKER_TOGGLE_BUTTON_ID;
     pickerBtn.type = "button";
     pickerBtn.addEventListener("click", () => {
       BUILDER_PICKER_OPEN = !BUILDER_PICKER_OPEN;
+      if (BUILDER_PICKER_OPEN) BUILDER_PIN_OPEN = false;
       ensureBuilderPickerPanel();
+      ensureBuilderPinPanel();
       updateBuilderPickerVisibility();
+      updateBuilderPinVisibility();
     });
     (document.body || document.documentElement).appendChild(pickerBtn);
   }
+  if (!document.getElementById(BUILDER_PIN_BUTTON_ID)) {
+    const pinBtn = document.createElement("button");
+    pinBtn.id = BUILDER_PIN_BUTTON_ID;
+    pinBtn.type = "button";
+    pinBtn.title = "Elemente an Ort und Größe festhalten";
+    pinBtn.addEventListener("click", () => {
+      BUILDER_PIN_OPEN = !BUILDER_PIN_OPEN;
+      if (BUILDER_PIN_OPEN) BUILDER_PICKER_OPEN = false;
+      ensureBuilderPickerPanel();
+      ensureBuilderPinPanel();
+      updateBuilderPickerVisibility();
+      updateBuilderPinVisibility();
+    });
+    (document.body || document.documentElement).appendChild(pinBtn);
+  }
   ensureBuilderOverlay();
   ensureBuilderPickerPanel();
+  ensureBuilderPinPanel();
   updateBuilderPickerVisibility();
+  updateBuilderPinVisibility();
   commitBuilderHistorySnapshot();
   refreshBuilderSelectionBox();
 }
 
 function selectBuilderElement(el) {
   if (!isBuilderElement(el)) return;
-  if (el.id === BUILDER_SAVE_BUTTON_ID || el.id === BUILDER_PICKER_TOGGLE_BUTTON_ID || el.id === BUILDER_RESET_BUTTON_ID || el.id === BUILDER_BOX_ID || el.id === BUILDER_HANDLE_ID) return;
-  if (el.closest(`#${BUILDER_SAVE_BUTTON_ID}`) || el.closest(`#${BUILDER_PICKER_TOGGLE_BUTTON_ID}`) || el.closest(`#${BUILDER_RESET_BUTTON_ID}`) || el.closest(`#${BUILDER_BOX_ID}`) || el.closest(`#${MENU_TOGGLE_BUTTON_ID}`)) return;
+  if (el.id === BUILDER_SAVE_BUTTON_ID || el.id === BUILDER_PICKER_TOGGLE_BUTTON_ID || el.id === BUILDER_RESET_BUTTON_ID || el.id === BUILDER_PIN_BUTTON_ID || el.id === BUILDER_BOX_ID || el.id === BUILDER_HANDLE_ID || el.id === BUILDER_ROTATE_HANDLE_ID) return;
+  if (el.closest(`#${BUILDER_SAVE_BUTTON_ID}`) || el.closest(`#${BUILDER_PICKER_TOGGLE_BUTTON_ID}`) || el.closest(`#${BUILDER_RESET_BUTTON_ID}`) || el.closest(`#${BUILDER_PIN_BUTTON_ID}`) || el.closest(`#${BUILDER_PIN_PANEL_ID}`) || el.closest(`#${BUILDER_BOX_ID}`) || el.closest(`#${MENU_TOGGLE_BUTTON_ID}`)) return;
   refreshBuilderTargets();
   const hit = getBuilderTargetFromNode(el);
   if (!hit || !hit.el) return;
@@ -1888,10 +2375,14 @@ function onBuilderMouseDown(ev) {
   if (!BUILDER_ACTIVE) return;
   const target = ev.target;
   if (!isBuilderElement(target)) return;
-  if (target.id === BUILDER_SAVE_BUTTON_ID || target.id === BUILDER_PICKER_TOGGLE_BUTTON_ID || target.id === BUILDER_RESET_BUTTON_ID || target.closest(`#${BUILDER_SAVE_BUTTON_ID}`) || target.closest(`#${BUILDER_PICKER_TOGGLE_BUTTON_ID}`) || target.closest(`#${BUILDER_RESET_BUTTON_ID}`) || target.closest(`#${MENU_TOGGLE_BUTTON_ID}`) || target.closest(`#${BUILDER_DIALOG_ID}`)) return;
+  if (target.id === BUILDER_SAVE_BUTTON_ID || target.id === BUILDER_PICKER_TOGGLE_BUTTON_ID || target.id === BUILDER_RESET_BUTTON_ID || target.id === BUILDER_PIN_BUTTON_ID || target.closest(`#${BUILDER_SAVE_BUTTON_ID}`) || target.closest(`#${BUILDER_PICKER_TOGGLE_BUTTON_ID}`) || target.closest(`#${BUILDER_RESET_BUTTON_ID}`) || target.closest(`#${BUILDER_PIN_BUTTON_ID}`) || target.closest(`#${BUILDER_PIN_PANEL_ID}`) || target.closest(`#${MENU_TOGGLE_BUTTON_ID}`) || target.closest(`#${BUILDER_DIALOG_ID}`)) return;
 
   const handle = target.id === BUILDER_HANDLE_ID ? target : target.closest(`#${BUILDER_HANDLE_ID}`);
   if (handle && BUILDER_SELECTED) {
+    if (isBuilderTargetLocked(BUILDER_SELECTED_SELECTOR)) {
+      blockBuilderEvent(ev);
+      return;
+    }
     const selector = BUILDER_SELECTED_SELECTOR;
     const entry = getBuilderEntry(selector);
     const rect = BUILDER_SELECTED.getBoundingClientRect();
@@ -1910,6 +2401,25 @@ function onBuilderMouseDown(ev) {
     return;
   }
 
+  const rotHandle = target.id === BUILDER_ROTATE_HANDLE_ID ? target : target.closest(`#${BUILDER_ROTATE_HANDLE_ID}`);
+  if (rotHandle && BUILDER_SELECTED) {
+    if (isBuilderTargetLocked(BUILDER_SELECTED_SELECTOR)) {
+      blockBuilderEvent(ev);
+      return;
+    }
+    const selector = BUILDER_SELECTED_SELECTOR;
+    const rect = BUILDER_SELECTED.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const prevAng = Math.atan2(ev.clientY - cy, ev.clientX - cx);
+    BUILDER_ROTATE_DRAG = {
+      selector,
+      prevAng
+    };
+    blockBuilderEvent(ev);
+    return;
+  }
+
   const chosen = normalizeBuilderPickElement(target.closest("*"));
   if (!chosen) return;
 
@@ -1919,6 +2429,7 @@ function onBuilderMouseDown(ev) {
     return;
   }
   const entry = getBuilderEntry(BUILDER_SELECTED_SELECTOR);
+  if (isBuilderTargetLocked(BUILDER_SELECTED_SELECTOR)) return;
   BUILDER_DRAG = {
     selector: BUILDER_SELECTED_SELECTOR,
     startX: ev.clientX,
@@ -1950,14 +2461,37 @@ function onBuilderMouseMove(ev) {
   if (BUILDER_RESIZE) {
     const entry = getBuilderEntry(BUILDER_RESIZE.selector);
     const min = getMinSizeForTarget(BUILDER_RESIZE.selector);
-    const nextW = Math.max(min.w, BUILDER_RESIZE.startW + (ev.clientX - BUILDER_RESIZE.startX));
-    const nextH = Math.max(min.h, BUILDER_RESIZE.startH + (ev.clientY - BUILDER_RESIZE.startY));
-    const rw = nextW / Math.max(10, BUILDER_RESIZE.startW);
-    const rh = nextH / Math.max(10, BUILDER_RESIZE.startH);
-    entry.sx = Math.max(0.25, Math.min(4.0, BUILDER_RESIZE.startSX * rw));
-    entry.sy = Math.max(0.25, Math.min(4.0, BUILDER_RESIZE.startSY * rh));
+    const sw = Math.max(10, BUILDER_RESIZE.startW);
+    const sh = Math.max(10, BUILDER_RESIZE.startH);
+    let nextW = Math.max(min.w, BUILDER_RESIZE.startW + (ev.clientX - BUILDER_RESIZE.startX));
+    let nextH = Math.max(min.h, BUILDER_RESIZE.startH + (ev.clientY - BUILDER_RESIZE.startY));
+    const rw = nextW / sw;
+    const rh = nextH / sh;
+    const f = Math.max(rw, rh);
+    nextW = Math.max(min.w, sw * f);
+    nextH = Math.max(min.h, sh * f);
+    const startU = Math.sqrt(Math.max(1e-8, BUILDER_RESIZE.startSX * BUILDER_RESIZE.startSY));
+    const u = Math.max(0.25, Math.min(4.0, startU * f));
+    entry.sx = u;
+    entry.sy = u;
     entry.w = nextW;
     entry.h = nextH;
+    if (BUILDER_SELECTED) applyBuilderEntryToElement(BUILDER_SELECTED, entry);
+    refreshBuilderSelectionBox();
+    return;
+  }
+  if (BUILDER_ROTATE_DRAG && BUILDER_SELECTED) {
+    const entry = getBuilderEntry(BUILDER_ROTATE_DRAG.selector);
+    const rect = BUILDER_SELECTED.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const ang = Math.atan2(ev.clientY - cy, ev.clientX - cx);
+    let d = ang - BUILDER_ROTATE_DRAG.prevAng;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    BUILDER_ROTATE_DRAG.prevAng = ang;
+    const nextRot = (Number(entry.rot || 0) || 0) + (d * 180) / Math.PI;
+    entry.rot = nextRot;
     if (BUILDER_SELECTED) applyBuilderEntryToElement(BUILDER_SELECTED, entry);
     refreshBuilderSelectionBox();
   }
@@ -1965,9 +2499,10 @@ function onBuilderMouseMove(ev) {
 
 function onBuilderMouseUp(ev) {
   if (!BUILDER_ACTIVE) return;
-  if (BUILDER_DRAG || BUILDER_RESIZE) {
+  if (BUILDER_DRAG || BUILDER_RESIZE || BUILDER_ROTATE_DRAG) {
     BUILDER_DRAG = null;
     BUILDER_RESIZE = null;
+    BUILDER_ROTATE_DRAG = null;
     commitBuilderHistorySnapshot();
     refreshBuilderSelectionBox();
   }
@@ -1992,8 +2527,39 @@ function onBuilderKeyDown(ev) {
     return;
   }
   if (!BUILDER_SELECTED || !BUILDER_SELECTED_SELECTOR) return;
-  if (ev.key !== "[" && ev.key !== "]") return;
+
   const entry = getBuilderEntry(BUILDER_SELECTED_SELECTOR);
+  if (isBuilderTargetLocked(BUILDER_SELECTED_SELECTOR)) return;
+
+  const stepTilt = ev.shiftKey ? 4 : 2;
+
+  if (ev.altKey && !ev.ctrlKey && !ev.metaKey) {
+    if (ev.key === "ArrowUp" || ev.key === "ArrowDown" || ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+      if (ev.key === "ArrowUp") entry.rx = Math.max(-42, Number(entry.rx || 0) - stepTilt);
+      if (ev.key === "ArrowDown") entry.rx = Math.min(42, Number(entry.rx || 0) + stepTilt);
+      if (ev.key === "ArrowLeft") entry.ry = Math.max(-42, Number(entry.ry || 0) - stepTilt);
+      if (ev.key === "ArrowRight") entry.ry = Math.min(42, Number(entry.ry || 0) + stepTilt);
+      applyBuilderEntryToElement(BUILDER_SELECTED, entry);
+      commitBuilderHistorySnapshot();
+      refreshBuilderSelectionBox();
+      ev.preventDefault();
+      return;
+    }
+    if (ev.key === "PageUp" || ev.key === "PageDown") {
+      let p = Number(entry.persp || 0);
+      if (p <= 0) p = 1000;
+      const deltaP = ev.key === "PageUp" ? 140 : -140;
+      entry.persp = Math.round(Math.max(220, Math.min(2800, p + deltaP)));
+      applyBuilderEntryToElement(BUILDER_SELECTED, entry);
+      commitBuilderHistorySnapshot();
+      refreshBuilderSelectionBox();
+      ev.preventDefault();
+      return;
+    }
+  }
+
+  if (ev.key !== "[" && ev.key !== "]") return;
+  if (ev.altKey) return;
   const delta = ev.key === "]" ? 2 : -2;
   entry.r = Math.max(0, Number(entry.r || 0) + delta);
   applyBuilderEntryToElement(BUILDER_SELECTED, entry);
@@ -2080,7 +2646,10 @@ function applyWebsiteTheme() {
   if (keepDefaultAlignment) {
     BUILDER_DATA = {};
   } else {
-    BUILDER_DATA = themeBuilderData || ((cfg.builderData && typeof cfg.builderData === "object") ? cfg.builderData : {});
+    BUILDER_DATA = cloneBuilderData(
+      themeBuilderData || ((cfg.builderData && typeof cfg.builderData === "object") ? cfg.builderData : {})
+    );
+    delete BUILDER_DATA[DARTBOARD_GLOW_TARGET_KEY];
   }
   setBuilderActive(cfg.enabled && BUILDER_SESSION_ACTIVE);
   if (cfg.enabled && !keepDefaultAlignment) applyBuilderDataToDom();
@@ -2092,6 +2661,7 @@ function startThemeBuilderSession() {
   if (!WEBSITE_THEME_STATE.enabled) {
     WEBSITE_THEME_STATE.enabled = true;
   }
+  delete BUILDER_DATA[DARTBOARD_GLOW_TARGET_KEY];
   BUILDER_SESSION_SNAPSHOT = cloneBuilderData(BUILDER_DATA);
   BUILDER_SESSION_ACTIVE = true;
   applyWebsiteTheme();

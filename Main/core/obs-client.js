@@ -10,6 +10,7 @@
   const OBS_RECONNECT_DELAY_MS = 2000;
   const OBS_MAX_AUTO_RETRIES = 5;
   const OBS_HEARTBEAT_MS = 15000;
+  const OBS_REACHABILITY_TIMEOUT_MS = 1200;
 
   let obsSocket = null;
   let obsConnecting = false;
@@ -32,22 +33,16 @@
   let lastObsConnectionLog = "";
 
   function isObsDebugEnabled() {
-    try {
-      return !!AD_SB.getSettings?.()?.debugObs;
-    } catch {
-      return false;
-    }
+    return true;
   }
 
   function debugObs(message, data) {
     if (!isObsDebugEnabled()) return;
-    try { console.log(`[Autodarts Modules] ${message}`, data || ""); } catch {}
     try { AD_SB.logger?.info?.("obs", message, data); } catch {}
   }
 
   function debugObsWarn(message, data) {
     if (!isObsDebugEnabled()) return;
-    try { console.warn(`[Autodarts Modules] ${message}`, data || ""); } catch {}
     try { AD_SB.logger?.warn?.("obs", message, data); } catch {}
   }
 
@@ -67,12 +62,27 @@
   }
 
   function setObsStatus(next) {
+    const prevState = obsStatus.state;
     obsStatus.state = String(next?.state || obsStatus.state || "unknown");
     obsStatus.url = String(next?.url ?? obsStatus.url ?? "");
     obsStatus.lastError = String(next?.lastError ?? obsStatus.lastError ?? "");
     obsStatus.attempts = Number.isFinite(next?.attempts) ? next.attempts : obsRetryAttempts;
     obsStatus.exhausted = typeof next?.exhausted === "boolean" ? next.exhausted : obsRetryExhausted;
     obsStatus.lastChangeTs = Date.now();
+    try {
+      if (!shouldUseObsConnection(AD_SB.getSettings?.())) return;
+      const u = obsStatus.url;
+      if (obsStatus.state === "connected" && prevState !== "connected") {
+        AD_SB.workerModuleStatusLog?.obs?.(true, u);
+      } else if (
+        obsStatus.state === "disconnected" &&
+        (prevState === "connected" || prevState === "connecting")
+      ) {
+        AD_SB.workerModuleStatusLog?.obs?.(false, u);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   function getObsStatus() {
@@ -115,6 +125,40 @@
       .map((item) => String(item || "").trim().toLowerCase())
       .filter(Boolean));
     return installed.has("effects") || installed.has("overlay") || installed.has("obszoom");
+  }
+
+  function toHttpProbeUrl(rawUrl) {
+    const value = String(rawUrl || "").trim();
+    if (!value) return "";
+    try {
+      const parsed = new URL(value);
+      const protocol = parsed.protocol === "wss:" ? "https:" : "http:";
+      return `${protocol}//${parsed.host}/`;
+    } catch {
+      return "";
+    }
+  }
+
+  async function canReachObsEndpoint(url, timeoutMs = OBS_REACHABILITY_TIMEOUT_MS) {
+    const probeUrl = toHttpProbeUrl(url);
+    if (!probeUrl) return false;
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeout = setTimeout(() => {
+      try { controller?.abort(); } catch {}
+    }, Math.max(300, Number(timeoutMs) || OBS_REACHABILITY_TIMEOUT_MS));
+    try {
+      await fetch(probeUrl, {
+        method: "GET",
+        mode: "no-cors",
+        cache: "no-store",
+        signal: controller?.signal
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   function stopObsConnection(reason = "manual") {
@@ -332,6 +376,326 @@
     if (!connected) throw new Error("obs_not_connected");
     const response = await sendObsRequestAwait("GetSceneItemList", { sceneName: targetScene }, 5000);
     return Array.isArray(response?.responseData?.sceneItems) ? response.responseData.sceneItems : [];
+  }
+
+  async function getObsSceneItemId(sceneName, sourceName) {
+    const want = String(sourceName || "").trim();
+    if (!want) throw new Error("missing_source_name");
+    const items = await getObsSceneItems(sceneName);
+    for (const it of items) {
+      if (String(it?.sourceName || "").trim() !== want) continue;
+      const id = Number(it?.sceneItemId);
+      if (Number.isFinite(id) && id >= 0) return id;
+    }
+    throw new Error("scene_item_not_found");
+  }
+
+  async function getObsSceneItemTransform(sceneName, sceneItemId) {
+    const scene = String(sceneName || "").trim();
+    const id = Number(sceneItemId);
+    if (!scene) throw new Error("missing_scene_name");
+    if (!Number.isFinite(id) || id < 0) throw new Error("missing_scene_item_id");
+    const connected = await ensureObsConnection();
+    if (!connected) throw new Error("obs_not_connected");
+    const response = await sendObsRequestAwait(
+      "GetSceneItemTransform",
+      { sceneName: scene, sceneItemId: id },
+      5000
+    );
+    return response?.responseData?.sceneItemTransform && typeof response.responseData.sceneItemTransform === "object"
+      ? response.responseData.sceneItemTransform
+      : null;
+  }
+
+  async function getObsVideoBaseResolution() {
+    const connected = await ensureObsConnection();
+    if (!connected) throw new Error("obs_not_connected");
+    const response = await sendObsRequestAwait("GetVideoSettings", {}, 5000);
+    const bw = Number(response?.responseData?.baseWidth);
+    const bh = Number(response?.responseData?.baseHeight);
+    const baseWidth = Number.isFinite(bw) && bw >= 8 ? Math.min(4096, Math.trunc(bw)) : 1920;
+    const baseHeight = Number.isFinite(bh) && bh >= 8 ? Math.min(4096, Math.trunc(bh)) : 1080;
+    return { baseWidth, baseHeight };
+  }
+
+  /**
+   * Linksoberer Eckpunkt des Szenen-Items (axis-aligned, Rotation 0) — gleiche Logik wie OBS `add_alignment`.
+   * @param {Record<string, unknown>} tr
+   * @returns {{ left: number, top: number, width: number, height: number }}
+   */
+  function sceneItemAxisAlignedTopLeft(tr) {
+    const w = Number(tr?.width);
+    const h = Number(tr?.height);
+    const posX = Number(tr?.positionX);
+    const posY = Number(tr?.positionY);
+    const align = Number(tr?.alignment) || 0;
+    const LEFT = 1;
+    const RIGHT = 2;
+    const TOP = 4;
+    const BOTTOM = 8;
+    const width = Number.isFinite(w) && w > 0 ? w : 1;
+    const height = Number.isFinite(h) && h > 0 ? h : 1;
+    const px = Number.isFinite(posX) ? posX : 0;
+    const py = Number.isFinite(posY) ? posY : 0;
+    let left = px;
+    let top = py;
+    if ((align & RIGHT) !== 0 && (align & LEFT) === 0) left -= width;
+    else if ((align & LEFT) === 0 && (align & RIGHT) === 0) left -= width / 2;
+    if ((align & BOTTOM) !== 0 && (align & TOP) === 0) top -= height;
+    else if ((align & TOP) === 0 && (align & BOTTOM) === 0) top -= height / 2;
+    return { left, top, width, height };
+  }
+
+  /**
+   * Für Kalibrierung: Rechteck der Ziel-Quelle auf dem Programm-Canvas (Pixel) + Crop/Quellengröße.
+   * `canvasWidth`/`canvasHeight` = Pixelgröße des PGM-Screenshots (typisch = Basis-Auflösung).
+   */
+  async function getObsZoomCalibPlacement(opts = {}) {
+    const sceneName = String(opts?.sceneName || "").trim();
+    const targetSourceName = String(opts?.targetSourceName || "").trim();
+    const canvasW = Math.max(1, Math.trunc(Number(opts?.canvasWidth) || 0));
+    const canvasH = Math.max(1, Math.trunc(Number(opts?.canvasHeight) || 0));
+    if (!sceneName) throw new Error("missing_scene_name");
+    if (!targetSourceName) throw new Error("missing_source_name");
+
+    const { baseWidth, baseHeight } = await getObsVideoBaseResolution();
+    const sx = canvasW / baseWidth;
+    const sy = canvasH / baseHeight;
+    const sceneItemId = await getObsSceneItemId(sceneName, targetSourceName);
+    const tr = await getObsSceneItemTransform(sceneName, sceneItemId);
+    if (!tr || typeof tr !== "object") throw new Error("scene_item_transform_unavailable");
+    const rotation = Number(tr.rotation) || 0;
+    const box = sceneItemAxisAlignedTopLeft(tr);
+    const rect = {
+      left: box.left * sx,
+      top: box.top * sy,
+      width: box.width * sx,
+      height: box.height * sy
+    };
+    const sourceWidth = Number(tr.sourceWidth) || 1920;
+    const sourceHeight = Number(tr.sourceHeight) || 1080;
+    return {
+      ok: true,
+      baseWidth,
+      baseHeight,
+      sceneName,
+      targetSourceName,
+      rect,
+      sourceWidth,
+      sourceHeight,
+      cropLeft: Number(tr.cropLeft) || 0,
+      cropRight: Number(tr.cropRight) || 0,
+      cropTop: Number(tr.cropTop) || 0,
+      cropBottom: Number(tr.cropBottom) || 0,
+      rotation,
+      rotationUnsupported: Math.abs(rotation) > 0.5
+    };
+  }
+
+  /**
+   * Screenshot einer OBS-Quelle (WebSocket 5: GetSourceScreenshot).
+   * @returns {{ imageData: string, sourceName: string }}
+   */
+  async function getObsSourceScreenshot(sourceName, options = {}) {
+    const sn = String(sourceName || "").trim();
+    if (!sn) throw new Error("missing_source_name");
+    const connected = await ensureObsConnection();
+    if (!connected) throw new Error("obs_not_connected");
+    const fmtRaw = String(options.imageFormat || "png").trim().toLowerCase();
+    const imageFormat = fmtRaw === "jpg" || fmtRaw === "jpeg" ? "jpeg" : "png";
+    const iw = Number(options.imageWidth);
+    const ih = Number(options.imageHeight);
+    const requestData = {
+      sourceName: sn,
+      imageFormat
+    };
+    const fp = String(options.imageFilePath || "").trim();
+    if (fp) requestData.imageFilePath = fp;
+    if (Number.isFinite(iw) && iw > 0) requestData.imageWidth = Math.min(1920, Math.max(64, Math.trunc(iw)));
+    if (Number.isFinite(ih) && ih > 0) requestData.imageHeight = Math.min(1080, Math.max(36, Math.trunc(ih)));
+    const q = Number(options.imageCompressionQuality);
+    if (Number.isFinite(q)) requestData.imageCompressionQuality = Math.max(-1, Math.min(100, Math.trunc(q)));
+
+    const response = await sendObsRequestAwait("GetSourceScreenshot", requestData, 12000);
+    const imageData = String(response?.responseData?.imageData || "").trim();
+    if (!imageData) throw new Error("obs_screenshot_empty");
+    return { imageData, sourceName: sn };
+  }
+
+  /**
+   * Screenshot der **aktuellen Programm-Szene** (Canvas / PGM) — keine einzelne Quelle.
+   * Nutzt GetCurrentProgramScene + GetSourceScreenshot (Szenen sind in OBS „Sources“).
+   */
+  async function getObsProgramCanvasScreenshot(options = {}) {
+    const connected = await ensureObsConnection();
+    if (!connected) throw new Error("obs_not_connected");
+    let sceneName = "";
+    try {
+      const cur = await sendObsRequestAwait("GetCurrentProgramScene", {}, 5000);
+      sceneName = String(
+        cur?.responseData?.sceneName || cur?.responseData?.currentProgramSceneName || ""
+      ).trim();
+    } catch {
+      sceneName = "";
+    }
+    const fb = String(options?.fallbackSceneName || "").trim();
+    if (!sceneName && fb) sceneName = fb;
+    if (!sceneName) throw new Error("program_scene_unknown");
+
+    const fmtRaw = String(options.imageFormat || "png").trim().toLowerCase();
+    const imageFormat = fmtRaw === "jpg" || fmtRaw === "jpeg" ? "jpeg" : "png";
+    const iw = Number(options.imageWidth);
+    const ih = Number(options.imageHeight);
+    const requestData = {
+      sourceName: sceneName,
+      imageFormat
+    };
+    if (Number.isFinite(iw) && iw > 0) requestData.imageWidth = Math.min(4096, Math.max(8, Math.trunc(iw)));
+    if (Number.isFinite(ih) && ih > 0) requestData.imageHeight = Math.min(4096, Math.max(8, Math.trunc(ih)));
+    const q = Number(options.imageCompressionQuality);
+    if (Number.isFinite(q)) requestData.imageCompressionQuality = Math.max(-1, Math.min(100, Math.trunc(q)));
+
+    const response = await sendObsRequestAwait("GetSourceScreenshot", requestData, 12000);
+    const imageData = String(response?.responseData?.imageData || "").trim();
+    if (!imageData) throw new Error("obs_screenshot_empty");
+    return { imageData, sceneName };
+  }
+
+  /**
+   * Move-Filter-Zieltransform aus Klick (0–1) + Zoom-Stärke ableiten und nach OBS schreiben.
+   * Legacy: `points` Record<filterName, { nx, ny }>.
+   * Canvas-Modus: `canvasMode` + optional `canvasPoint` — gleicher Klick/Zoom für alle Move-Filter laut getDesiredMoveFilterNames.
+   */
+  async function applyObsZoomCalibration(payload = {}) {
+    const sceneName = String(payload?.sceneName || "").trim();
+    const targetSourceName = String(payload?.targetSourceName || "").trim();
+    const points = payload?.points && typeof payload.points === "object" ? payload.points : {};
+    const canvasMode = !!payload?.canvasMode;
+    const canvasPoint =
+      payload?.canvasPoint && typeof payload.canvasPoint === "object" ? payload.canvasPoint : null;
+    const hasCanvasPoint =
+      !!canvasPoint &&
+      Number.isFinite(Number(canvasPoint.nx)) &&
+      Number.isFinite(Number(canvasPoint.ny));
+    const strength = Math.max(1, Math.min(2000, Number(payload?.strength) || 150));
+    const zoomPercent = Math.max(50, Math.min(400, Number(payload?.zoomPercent) || 100));
+    if (!sceneName) throw new Error("missing_scene_name");
+    if (!targetSourceName) throw new Error("missing_source_name");
+
+    const filterOpts = {
+      includeBase: true,
+      includeSingles: payload?.includeSingles !== false,
+      includeDoubles: payload?.includeDoubles !== false,
+      includeTriples: payload?.includeTriples !== false
+    };
+
+    let filterNames = [];
+    if (canvasMode) {
+      filterNames = getDesiredMoveFilterNames(filterOpts);
+    } else {
+      filterNames = Object.keys(points).filter((k) => {
+        const p = points[k];
+        return (
+          p &&
+          typeof p === "object" &&
+          Number.isFinite(Number(p.nx)) &&
+          Number.isFinite(Number(p.ny))
+        );
+      });
+    }
+    if (!filterNames.length) throw new Error("no_calibration_points");
+
+    const sceneItemId = await getObsSceneItemId(sceneName, targetSourceName);
+    const tr = await getObsSceneItemTransform(sceneName, sceneItemId);
+    if (!tr || typeof tr !== "object") throw new Error("scene_item_transform_unavailable");
+
+    const tw = Number(tr.width);
+    const th = Number(tr.height);
+    const w = Number.isFinite(tw) && tw > 1 ? tw : 1920;
+    const h = Number.isFinite(th) && th > 1 ? th : 1080;
+    const baseX = Number(tr.positionX);
+    const baseY = Number(tr.positionY);
+    const bx = Number.isFinite(baseX) ? baseX : 0;
+    const by = Number.isFinite(baseY) ? baseY : 0;
+    const k = strength / 150;
+    const zoomMul = zoomPercent / 100;
+
+    const baseSx = Number(tr.scaleX);
+    const baseSy = Number(tr.scaleY);
+    const sx0 = Number.isFinite(baseSx) && baseSx > 0 ? baseSx : 100;
+    const sy0 = Number.isFinite(baseSy) && baseSy > 0 ? baseSy : 100;
+    const newSx = sx0 * zoomMul;
+    const newSy = sy0 * zoomMul;
+
+    const updatePos = canvasMode ? hasCanvasPoint : true;
+    let nx = 0.5;
+    let ny = 0.5;
+    if (updatePos) {
+      if (canvasMode && hasCanvasPoint) {
+        nx = Math.max(0, Math.min(1, Number(canvasPoint.nx)));
+        ny = Math.max(0, Math.min(1, Number(canvasPoint.ny)));
+      }
+    }
+
+    let applied = 0;
+    const errors = [];
+    for (const filterName of filterNames) {
+      let pNx = nx;
+      let pNy = ny;
+      if (!canvasMode) {
+        const p = points[filterName];
+        if (!p || typeof p !== "object") continue;
+        pNx = Math.max(0, Math.min(1, Number(p.nx)));
+        pNy = Math.max(0, Math.min(1, Number(p.ny)));
+      }
+      const newX = bx + (0.5 - pNx) * w * k;
+      const newY = by + (0.5 - pNy) * h * k;
+      try {
+        const detail = await getObsSourceFilter(sceneName, filterName);
+        const prev =
+          detail?.filterSettings && typeof detail.filterSettings === "object"
+            ? cloneJsonValue(detail.filterSettings)
+            : {};
+        const prevPos = prev.pos && typeof prev.pos === "object" ? prev.pos : {};
+        const prevScale = prev.scale && typeof prev.scale === "object" ? prev.scale : {};
+        const next = {
+          ...prev,
+          transform: true,
+          scale: {
+            ...prevScale,
+            x: newSx,
+            y: newSy,
+            x_sign: "=",
+            y_sign: "="
+          }
+        };
+        if (updatePos) {
+          next.pos = {
+            ...prevPos,
+            x: newX,
+            y: newY,
+            x_sign: "=",
+            y_sign: "="
+          };
+        }
+        await sendObsRequestAwait(
+          "SetSourceFilterSettings",
+          {
+            sourceName: sceneName,
+            filterName: String(filterName).trim(),
+            filterSettings: next,
+            overlay: true
+          },
+          5000
+        );
+        applied += 1;
+      } catch (error) {
+        errors.push({ filterName, error: String(error?.message || error || "unknown_error") });
+      }
+    }
+
+    debugObs("OBS zoom calibration applied", { sceneName, targetSourceName, applied, errors: errors.length });
+    return { sceneName, targetSourceName, applied, errors };
   }
 
   async function getObsInputDetails(inputName) {
@@ -818,12 +1182,20 @@
     if (obsRetryAttempts >= OBS_MAX_AUTO_RETRIES) {
       obsRetryExhausted = true;
       setObsStatus({ state: "disconnected", lastError: reason, exhausted: true });
+      debugObsWarn(`OBS reconnect exhausted (${String(reason)})`, {
+        attempts: obsRetryAttempts,
+        url: obsStatus.url
+      });
       return;
     }
     obsRetryTimer = setTimeout(() => {
       obsRetryTimer = null;
       void ensureObsConnection();
     }, OBS_RECONNECT_DELAY_MS);
+    debugObsWarn(`OBS reconnect scheduled (${String(reason)})`, {
+      delayMs: OBS_RECONNECT_DELAY_MS,
+      url: obsStatus.url
+    });
   }
 
   async function ensureObsConnection(force = false) {
@@ -851,6 +1223,15 @@
     obsRetryAttempts += 1;
     obsRetryExhausted = false;
     setObsStatus({ state: "connecting", url, lastError: "" });
+    debugObs(`OBS connecting (${url})`, { attempt: obsRetryAttempts });
+    const endpointReachable = await canReachObsEndpoint(url);
+    if (!endpointReachable) {
+      obsConnecting = false;
+      setObsStatus({ state: "disconnected", url, lastError: "connect_failed" });
+      debugObsWarn(`OBS endpoint unreachable (${url})`, { attempt: obsRetryAttempts });
+      scheduleObsRetry("connect_failed");
+      return false;
+    }
     return new Promise((resolve) => {
       let settled = false;
 
@@ -862,9 +1243,10 @@
 
       try {
         obsSocket = new WebSocket(url, "obswebsocket.json");
-      } catch {
+      } catch (e) {
         obsConnecting = false;
         setObsStatus({ state: "disconnected", url, lastError: "connect_failed" });
+        debugObsWarn(`OBS websocket failed (${url})`, { error: String(e?.message || e) });
         scheduleObsRetry("connect_failed");
         finish(false);
         return;
@@ -874,6 +1256,7 @@
         obsIdentified = false;
         obsVerified = false;
         setObsStatus({ state: "connecting", url, lastError: "" });
+        debugObs(`OBS ws open (${url})`, {});
       };
 
       obsSocket.onmessage = async (event) => {
@@ -1002,6 +1385,13 @@
   AD_SB.getObsMoveFilterBackup = getObsMoveFilterBackup;
   AD_SB.importObsMoveFilterBackup = importObsMoveFilterBackup;
   AD_SB.getObsMoveFilterNameList = getObsMoveFilterNameList;
+  AD_SB.getObsSceneItems = getObsSceneItems;
+  AD_SB.getObsSceneItemTransform = getObsSceneItemTransform;
+  AD_SB.getObsSourceScreenshot = getObsSourceScreenshot;
+  AD_SB.getObsProgramCanvasScreenshot = getObsProgramCanvasScreenshot;
+  AD_SB.getObsVideoBaseResolution = getObsVideoBaseResolution;
+  AD_SB.getObsZoomCalibPlacement = getObsZoomCalibPlacement;
+  AD_SB.applyObsZoomCalibration = applyObsZoomCalibration;
   AD_SB.refreshObsConnection = () => {
     if (shouldUseObsConnection()) return ensureObsConnection();
     stopObsConnection("disabled");

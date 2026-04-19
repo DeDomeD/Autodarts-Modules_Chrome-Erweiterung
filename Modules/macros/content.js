@@ -1,6 +1,4 @@
 (() => {
-  console.log("[Autodarts Modules] macros content loaded");
-
   const STYLE_ID = "ad-sb-macros-style";
   const PANEL_ID = "ad-sb-macros-panel";
   const STATUS_ID = "ad-sb-macros-status";

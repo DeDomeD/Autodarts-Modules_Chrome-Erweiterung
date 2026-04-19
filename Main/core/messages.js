@@ -12,8 +12,19 @@
   const lastPlayerNamesByIndex = {};
   let lastActivePlayerIndex = null;
   const websiteThemeCssByTabId = new Map();
-  const ACTION_ICON_GRAY = "Main/assets/ICON_grau_16.png";
-  const ACTION_ICON_COLOR = "Main/assets/ICON_16.png";
+  /** Verhindert wiederholtes `setIcon` (Netzwerk/Devtools-Spam), wenn sich der Zustand pro Tab nicht ändert. */
+  const lastToolbarIconColorByTabId = new Map();
+  const ACTION_ICON_GRAY = {
+    16: "Main/assets/ICON_grau_16.png",
+    32: "Main/assets/ICON_grau_32.png"
+  };
+  const ACTION_ICON_COLOR = {
+    16: "Main/assets/ICON_16.png",
+    32: "Main/assets/ICON_32.png"
+  };
+
+  /** GET_WLED_PRESETS wird oft gepollt — Mirror nicht bei jedem erfolgreichen Fetch fluten. */
+  const lastWledPresetMirrorLogByEndpoint = new Map();
 
   function logInfo(channel, message, data) {
     try { AD_SB.logger?.info?.(channel, message, data); } catch {}
@@ -58,7 +69,17 @@
   }
 
   function isAutodartsUrl(url) {
-    return /^https:\/\/play\.autodarts\.io\/?/i.test(String(url || ""));
+    const raw = String(url || "").trim();
+    if (!raw || raw.startsWith("chrome://") || raw.startsWith("edge://")) return false;
+    try {
+      const u = new URL(raw);
+      if (u.protocol !== "https:") return false;
+      const host = u.hostname.toLowerCase();
+      /** z. B. play.autodarts.io oder *.play.autodarts.io (Staging); nicht nur strikter String-Prefix. */
+      return host === "play.autodarts.io" || host.endsWith(".play.autodarts.io");
+    } catch {
+      return /^https:\/\/play\.autodarts\.io\b/i.test(raw);
+    }
   }
 
   const DEFAULT_WEBSITE_API_URL = "https://autodarts-modules-production.up.railway.app";
@@ -164,19 +185,135 @@
     try {
       if (!chrome?.action?.setIcon) return;
       if (!Number.isInteger(tabId)) return;
-      const relPath = isColor ? ACTION_ICON_COLOR : ACTION_ICON_GRAY;
-      const path = chrome.runtime?.getURL ? chrome.runtime.getURL(relPath) : relPath;
-      const details = { tabId, path };
-      chrome.action.setIcon(details, () => {
-        // Always read lastError to avoid "Unchecked runtime.lastError"
-        void chrome.runtime?.lastError;
-      });
+      if (lastToolbarIconColorByTabId.get(tabId) === isColor) return;
+      const path = isColor ? ACTION_ICON_COLOR : ACTION_ICON_GRAY;
+      const runtimePath = chrome.runtime?.getURL
+        ? {
+            16: chrome.runtime.getURL(path[16]),
+            32: chrome.runtime.getURL(path[32])
+          }
+        : null;
+      const variants = [{ tabId, path }];
+      if (runtimePath) variants.push({ tabId, path: runtimePath });
+
+      let idx = 0;
+      const tryNext = () => {
+        if (idx >= variants.length) {
+          lastToolbarIconColorByTabId.delete(tabId);
+          return;
+        }
+        const details = variants[idx];
+        idx += 1;
+        chrome.action.setIcon(details, () => {
+          const err = chrome.runtime?.lastError;
+          if (err) {
+            tryNext();
+            return;
+          }
+          lastToolbarIconColorByTabId.set(tabId, isColor);
+        });
+      };
+      tryNext();
     } catch {}
   }
 
   function refreshActionIconByTab(tabId, tabObj) {
-    const url = String(tabObj?.url || tabObj?.pendingUrl || "");
-    setActionIconForTab(tabId, isAutodartsUrl(url));
+    const directUrl = String(tabObj?.url || tabObj?.pendingUrl || "");
+    if (directUrl) {
+      setActionIconForTab(tabId, isAutodartsUrl(directUrl));
+      return;
+    }
+    if (!chrome?.tabs?.get || !Number.isInteger(tabId)) {
+      setActionIconForTab(tabId, false);
+      return;
+    }
+    chrome.tabs.get(tabId, (resolvedTab) => {
+      const err = chrome.runtime?.lastError;
+      if (err) {
+        setActionIconForTab(tabId, false);
+        return;
+      }
+      const resolvedUrl = String(resolvedTab?.url || resolvedTab?.pendingUrl || "");
+      setActionIconForTab(tabId, isAutodartsUrl(resolvedUrl));
+    });
+  }
+
+  /**
+   * Öffnet DevTools für den eigenen MV3-Service-Worker (Target.openDevTools über Browser-Target).
+   * Fallback: chrome://inspect → chrome://extensions (jeweils neuer Tab).
+   */
+  async function openExtensionServiceWorkerDevTools() {
+    const extId = chrome.runtime.id;
+    const tryOpenUrl = (url) =>
+      new Promise((resolve) => {
+        if (!chrome.tabs?.create) {
+          resolve(false);
+          return;
+        }
+        chrome.tabs.create({ url, active: true }, () => {
+          resolve(!chrome.runtime.lastError);
+        });
+      });
+
+    let targets = [];
+    if (chrome.debugger?.getTargets) {
+      try {
+        targets = await chrome.debugger.getTargets();
+      } catch {
+        targets = [];
+      }
+    }
+
+    const prefix = `chrome-extension://${extId}/`;
+    const swTarget =
+      targets.find(
+        (t) =>
+          typeof t.url === "string" &&
+          t.url.startsWith(prefix) &&
+          (String(t.type || "").toLowerCase() === "service_worker" ||
+            t.type === "worker" ||
+            t.type === "background_page")
+      ) || targets.find((t) => typeof t.url === "string" && t.url.startsWith(prefix));
+
+    let browserTarget = targets.find((t) => String(t.type || "").toLowerCase() === "browser");
+    if (!browserTarget) {
+      browserTarget = targets.find(
+        (t) => String(t.type || "").toLowerCase() === "tab" && String(t.url || "").startsWith("chrome://")
+      );
+    }
+
+    if (swTarget?.id && browserTarget?.id && chrome.debugger?.attach && chrome.debugger?.sendCommand) {
+      try {
+        await chrome.debugger.attach({ targetId: browserTarget.id }, "1.3");
+        try {
+          await chrome.debugger.sendCommand(
+            { targetId: browserTarget.id },
+            "Target.openDevTools",
+            { targetId: swTarget.id, panelId: "console" }
+          );
+          return { ok: true, method: "openDevTools" };
+        } catch (e) {
+          logInfo("system", "Target.openDevTools failed", { error: String(e?.message || e) });
+        } finally {
+          try {
+            await chrome.debugger.detach({ targetId: browserTarget.id });
+          } catch {}
+        }
+      } catch (e) {
+        logInfo("system", "debugger attach (browser) failed", { error: String(e?.message || e) });
+      }
+    }
+
+    if (await tryOpenUrl("chrome://inspect/#workers")) {
+      return { ok: true, method: "inspect_workers" };
+    }
+    if (await tryOpenUrl("chrome://inspect/#service-workers")) {
+      return { ok: true, method: "inspect_service_workers" };
+    }
+    if (await tryOpenUrl(`chrome://extensions/?id=${encodeURIComponent(extId)}`)) {
+      return { ok: true, method: "extensions" };
+    }
+    return { ok: false, error: "no_tab_opened" };
   }
 
   function bindMessageListener() {
@@ -186,6 +323,7 @@
     if (chrome?.tabs?.onRemoved?.addListener) {
       chrome.tabs.onRemoved.addListener((tabId) => {
         websiteThemeCssByTabId.delete(tabId);
+        lastToolbarIconColorByTabId.delete(tabId);
       });
     }
     if (chrome?.tabs?.onUpdated?.addListener) {
@@ -193,9 +331,20 @@
         if (changeInfo?.status === "loading") {
           websiteThemeCssByTabId.delete(tabId);
         }
-        if (changeInfo?.url || changeInfo?.status === "complete" || changeInfo?.status === "loading") {
-          refreshActionIconByTab(tabId, tab);
+        // Nur bei URL-Wechsel oder abgeschlossenem Load — nicht bei jedem `loading`-Tick (weniger setIcon-Aufrufe).
+        if (changeInfo?.url || changeInfo?.status === "complete") {
+          const tabLike = (changeInfo?.url || tab?.url || tab?.pendingUrl)
+            ? { ...(tab || {}), url: changeInfo?.url || tab?.url || tab?.pendingUrl }
+            : tab;
+          refreshActionIconByTab(tabId, tabLike);
         }
+      });
+    }
+    if (chrome?.tabs?.onCreated?.addListener) {
+      chrome.tabs.onCreated.addListener((tab) => {
+        const tabId = tab?.id;
+        if (!Number.isInteger(tabId)) return;
+        refreshActionIconByTab(tabId, tab);
       });
     }
     if (chrome?.tabs?.onActivated?.addListener) {
@@ -212,16 +361,26 @@
       });
     }
     if (chrome?.tabs?.query) {
-      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-        if (chrome.runtime?.lastError) {
-          return;
-        }
-        const tab = Array.isArray(tabs) ? tabs[0] : null;
-        if (!tab || !Number.isInteger(tab.id)) {
-          return;
-        }
-        refreshActionIconByTab(tab.id, tab);
-      });
+      const refreshFocusedTabIcon = () => {
+        chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+          if (chrome.runtime?.lastError) {
+            return;
+          }
+          const tab = Array.isArray(tabs) ? tabs[0] : null;
+          if (!tab || !Number.isInteger(tab.id)) {
+            return;
+          }
+          refreshActionIconByTab(tab.id, tab);
+        });
+      };
+      refreshFocusedTabIcon();
+      /** Nach TAB/Fenster-Wechsel (MV3-SW neu): Icon neu an aktive URL koppeln. */
+      if (chrome?.windows?.onFocusChanged?.addListener) {
+        chrome.windows.onFocusChanged.addListener((windowId) => {
+          if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+          refreshFocusedTabIcon();
+        });
+      }
     }
 
     function removeCss(tabId, css) {
@@ -279,13 +438,26 @@
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (async () => {
         try {
-          const msgType = String(msg?.type || "unknown");
-          logInfo("system", "runtime message received", {
-            type: msgType,
-            tabId: sender?.tab?.id ?? null
-          });
-
           const settings = AD_SB.getSettings();
+
+          if (msg?.type === "OPEN_SERVICE_WORKER_DEVTOOLS") {
+            const result = await openExtensionServiceWorkerDevTools();
+            sendResponse(result);
+            return;
+          }
+
+          if (msg?.type === "GET_WORKER_MIRROR_DELTA") {
+            const afterId = Number(msg?.afterId);
+            const snap = AD_SB.workerMirrorLog?.getSince?.(Number.isFinite(afterId) ? afterId : -1);
+            sendResponse({ ok: true, ...(snap || { lines: [], lastId: -1, truncated: false }) });
+            return;
+          }
+
+          if (msg?.type === "CLEAR_WORKER_MIRROR_LOG") {
+            AD_SB.workerMirrorLog?.clear?.();
+            sendResponse({ ok: true });
+            return;
+          }
 
           if (msg?.type === "GET_SETTINGS") {
             sendResponse({ ok: true, settings });
@@ -295,6 +467,9 @@
           if (msg?.type === "SET_SETTINGS") {
             const updated = await AD_SB.setSettings(msg.settings || {});
             AD_SB.refreshRuntimeConnections?.();
+            try {
+              AD_SB.overlay?.afterSettingsSaved?.();
+            } catch {}
             logInfo("system", "settings updated", {
               keys: Object.keys(msg.settings || {})
             });
@@ -311,6 +486,16 @@
 
           if (msg?.type === "GET_SB_STATUS") {
             sendResponse({ ok: true, status: AD_SB.getSBStatus?.() || { state: "unknown" } });
+            return;
+          }
+
+          if (msg?.type === "SB_GET_ACTIONS") {
+            const r = await AD_SB.requestGetActions?.(Number(msg?.timeoutMs) || 4000);
+            if (r?.ok) {
+              sendResponse({ ok: true, actions: Array.isArray(r.actions) ? r.actions : [] });
+            } else {
+              sendResponse({ ok: false, error: String(r?.error || "sb_get_actions_failed"), actions: [] });
+            }
             return;
           }
 
@@ -370,6 +555,52 @@
             return;
           }
 
+          if (msg?.type === "OBS_GET_SOURCE_SCREENSHOT") {
+            try {
+              const prog = msg?.mode === "program" || msg?.canvas === true;
+              const shot = prog
+                ? await AD_SB.getObsProgramCanvasScreenshot?.({
+                    ...msg?.options,
+                    fallbackSceneName: settings?.obsZoomSceneName
+                  })
+                : await AD_SB.getObsSourceScreenshot?.(msg?.sourceName, msg?.options || {});
+              sendResponse({ ok: true, ...shot });
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e?.message || e || "obs_get_source_screenshot_failed") });
+            }
+            return;
+          }
+
+          if (msg?.type === "OBS_GET_VIDEO_BASE") {
+            try {
+              const dims = await AD_SB.getObsVideoBaseResolution?.();
+              sendResponse({ ok: true, ...dims });
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e?.message || e || "obs_get_video_base_failed") });
+            }
+            return;
+          }
+
+          if (msg?.type === "OBS_GET_ZOOM_CALIB_PLACEMENT") {
+            try {
+              const placement = await AD_SB.getObsZoomCalibPlacement?.(msg?.payload || {});
+              sendResponse({ ok: true, ...placement });
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e?.message || e || "obs_get_zoom_calib_placement_failed") });
+            }
+            return;
+          }
+
+          if (msg?.type === "OBS_APPLY_ZOOM_CALIBRATION") {
+            try {
+              const result = await AD_SB.applyObsZoomCalibration?.(msg?.payload || {});
+              sendResponse({ ok: true, ...result });
+            } catch (e) {
+              sendResponse({ ok: false, error: String(e?.message || e || "obs_apply_zoom_calibration_failed") });
+            }
+            return;
+          }
+
           if (msg?.type === "OBS_DELETE_MOVE_FILTERS") {
             const result = await AD_SB.deleteObsMoveFilters?.(msg?.sceneName, {
               includeSingles: msg?.includeSingles,
@@ -409,40 +640,155 @@
           }
 
           if (msg?.type === "GET_WLED_PRESETS") {
-            const presets = await AD_SB.wled?.fetchPresets?.(msg?.endpoint);
-            logInfo("wled", "presets loaded", {
-              endpoint: msg?.endpoint || "",
-              count: Array.isArray(presets) ? presets.length : 0
-            });
-            sendResponse({ ok: true, presets: Array.isArray(presets) ? presets : [] });
-            return;
+            try {
+              const presets = await AD_SB.wled?.fetchPresets?.(msg?.endpoint);
+              const epKey = String(msg?.endpoint || "").trim() || "?";
+              const cnt = Array.isArray(presets) ? presets.length : 0;
+              const now = Date.now();
+              const prevLog = lastWledPresetMirrorLogByEndpoint.get(epKey);
+              const shouldMirrorLog = !prevLog || prevLog.count !== cnt || (now - prevLog.ts) > 60000;
+              if (shouldMirrorLog) {
+                logInfo("wled", "presets loaded", {
+                  endpoint: msg?.endpoint || "",
+                  count: cnt
+                });
+                lastWledPresetMirrorLogByEndpoint.set(epKey, { ts: now, count: cnt });
+                try {
+                  AD_SB.workerModuleStatusLog?.wled?.(true, msg?.endpoint);
+                } catch {
+                  // ignore
+                }
+              }
+              sendResponse({ ok: true, presets: Array.isArray(presets) ? presets : [] });
+              return;
+            } catch (e) {
+              try {
+                AD_SB.workerModuleStatusLog?.wled?.(false, msg?.endpoint);
+              } catch {
+                // ignore
+              }
+              logError("wled", "presets fetch failed", {
+                endpoint: msg?.endpoint || "",
+                error: String(e?.message || e)
+              });
+              sendResponse({ ok: false, error: String(e?.message || e), presets: [] });
+              return;
+            }
           }
 
           if (msg?.type === "TRIGGER_WLED_PRESET") {
-            await AD_SB.wled?.triggerPreset?.(msg?.endpoint, msg?.presetId);
-            logInfo("wled", "preset trigger requested", {
-              endpoint: msg?.endpoint || "",
-              presetId: msg?.presetId ?? null
-            });
-            sendResponse({ ok: true });
-            return;
+            try {
+              await AD_SB.wled?.triggerPreset?.(msg?.endpoint, msg?.presetId);
+              logInfo("wled", "preset trigger requested", {
+                endpoint: msg?.endpoint || "",
+                presetId: msg?.presetId ?? null
+              });
+              sendResponse({ ok: true });
+              return;
+            } catch (e) {
+              try {
+                AD_SB.workerModuleStatusLog?.wled?.(false, msg?.endpoint);
+              } catch {
+                // ignore
+              }
+              logError("wled", "preset trigger failed", {
+                endpoint: msg?.endpoint || "",
+                presetId: msg?.presetId ?? null,
+                error: String(e?.message || e)
+              });
+              sendResponse({ ok: false, error: String(e?.message || e) });
+              return;
+            }
           }
 
           if (msg?.type === "TRIGGER_WLED_TARGETS") {
-            await AD_SB.wled?.triggerTargets?.(msg?.targets, settings, msg?.advancedJson || "");
-            sendResponse({ ok: true });
-            return;
+            try {
+              await AD_SB.wled?.triggerTargets?.(msg?.targets, settings, msg?.advancedJson || "");
+              const lm = msg?.wledLogMeta;
+              if (lm && typeof lm === "object") {
+                try {
+                  AD_SB.triggerWorkerLog?.printAdmWledEffectLine?.({
+                    effectName: String(lm.effectName || "").trim() || "WLED",
+                    triggerUnit: String(lm.triggerUnit || "").trim() || "Test",
+                    presetSummary: String(lm.presetSummary || "").trim() || "—"
+                  });
+                } catch {
+                  // ignore
+                }
+              }
+              sendResponse({ ok: true });
+              return;
+            } catch (e) {
+              logError("wled", "wled targets trigger failed", {
+                error: String(e?.message || e)
+              });
+              sendResponse({ ok: false, error: String(e?.message || e) });
+              return;
+            }
+          }
+
+          if (msg?.type === "GET_PIXELIT_MATRIXINFO") {
+            try {
+              const info = await AD_SB.pixelit?.fetchMatrixInfo?.(msg?.endpoint || settings?.pixelitBaseUrl);
+              logInfo("pixelit", "matrixinfo ok", {
+                endpoint: String(msg?.endpoint || settings?.pixelitBaseUrl || "").trim()
+              });
+              sendResponse({ ok: true, info: info && typeof info === "object" ? info : {} });
+              return;
+            } catch (e) {
+              logError("pixelit", "matrixinfo failed", {
+                endpoint: String(msg?.endpoint || settings?.pixelitBaseUrl || "").trim(),
+                error: String(e?.message || e)
+              });
+              sendResponse({ ok: false, error: String(e?.message || e), info: null });
+              return;
+            }
+          }
+
+          if (msg?.type === "TRIGGER_PIXELIT_TEST") {
+            try {
+              const endpoint = String(msg?.endpoint || settings?.pixelitBaseUrl || "").trim();
+              const text = String(msg?.text || "ADM").trim().slice(0, 120) || "ADM";
+              const body = {
+                switchAnimation: { aktiv: true, animation: "fade" },
+                text: {
+                  textString: text,
+                  bigFont: text.length <= 6,
+                  scrollText: text.length > 6 ? "auto" : false,
+                  scrollTextDelay: 45,
+                  centerText: true,
+                  position: { x: 8, y: 1 },
+                  hexColor: "#FFFFFF"
+                }
+              };
+              await AD_SB.pixelit?.postScreen?.(endpoint, body);
+              logInfo("pixelit", "test screen sent", { endpoint });
+              sendResponse({ ok: true });
+              return;
+            } catch (e) {
+              logError("pixelit", "test screen failed", {
+                error: String(e?.message || e)
+              });
+              sendResponse({ ok: false, error: String(e?.message || e) });
+              return;
+            }
           }
 
           if (msg?.type === "AUTODARTS_TAB_ACTIVE") {
             const tabId = sender?.tab?.id;
-            if (Number.isInteger(tabId)) setActionIconForTab(tabId, true);
+            /**
+             * Content-Script ist nur auf https://play.autodarts.io/* registriert — keine URL-Prüfung:
+             * `sender.tab.url` ist während Laden oft `about:blank` / veraltet, dann blieb das Icon grau.
+             */
+            if (Number.isInteger(tabId)) {
+              setActionIconForTab(tabId, true);
+            }
             sendResponse({ ok: true });
             return;
           }
 
           if (msg?.type === "AUTODARTS_NAVIGATION") {
-            AD_SB.autodartsTriggers?.handleNavigation?.(msg.payload);
+            AD_SB.admTriggers?.handleNavigation?.(msg.payload);
             sendResponse({ ok: true });
             return;
           }
@@ -477,50 +823,65 @@
 
           if (msg?.type === "AUTODARTS_EVENT") {
             const e = msg.payload;
+            if (e?.type === "match_context") {
+              AD_SB.applyMatchContextFromPage?.(e);
+              sendResponse({ ok: true });
+              return;
+            }
             if (!e?.type) {
               sendResponse({ ok: true, skipped: true });
               return;
             }
             AD_SB.capture?.ingestEvent?.(e);
 
+            const logGame = true;
+            const logThrow = logGame;
+            const logState = logGame;
+            const logBoardEv = logGame;
             if (e.type === "throw") {
-              logInfo("throws", "throw event", {
-                player: e.player ?? null,
-                playerName: e.playerName ?? null,
-                score: e.score ?? null,
-                segment: e.segment ?? null,
-                multiplier: e.multiplier ?? null,
-                number: e.number ?? null
-              });
+              if (logThrow) {
+                logInfo("throws", "throw event", {
+                  player: e.player ?? null,
+                  playerName: e.playerName ?? null,
+                  score: e.score ?? null,
+                  segment: e.segment ?? null,
+                  multiplier: e.multiplier ?? null,
+                  number: e.number ?? null
+                });
+              }
             } else if (e.type === "state") {
               updatePlayerNameCacheFromState(e);
               const stateIdx = asValidPlayerIndex(e.player);
               if (stateIdx !== null) lastActivePlayerIndex = stateIdx;
-              logInfo("state", "state event", {
-                matchId: e.matchId ?? null,
-                player: e.player ?? null,
-                round: e.round ?? null,
-                set: e.set ?? null,
-                leg: e.leg ?? null,
-                turnBusted: !!e.turnBusted,
-                gameFinished: !!e.gameFinished,
-                winner: e.winner ?? null,
-                checkoutGuide: e.checkoutGuide ?? null,
-                playerScores: Array.isArray(e.playerScores) ? e.playerScores : null
-              });
+              if (logState) {
+                logInfo("state", "state event", {
+                  matchId: e.matchId ?? null,
+                  player: e.player ?? null,
+                  round: e.round ?? null,
+                  set: e.set ?? null,
+                  leg: e.leg ?? null,
+                  turnBusted: !!e.turnBusted,
+                  gameFinished: !!e.gameFinished,
+                  winner: e.winner ?? null,
+                  checkoutGuide: e.checkoutGuide ?? null,
+                  playerScores: Array.isArray(e.playerScores) ? e.playerScores : null
+                });
+              }
             } else if (e.type === "event") {
-              logInfo("events", "game event", {
-                event: e.event ?? "unknown",
-                matchId: e.matchId ?? null,
-                set: e.set ?? null,
-                leg: e.leg ?? null,
-                player: e.player ?? null
-              });
+              if (logBoardEv) {
+                logInfo("events", "game event", {
+                  event: e.event ?? "unknown",
+                  matchId: e.matchId ?? null,
+                  set: e.set ?? null,
+                  leg: e.leg ?? null,
+                  player: e.player ?? null
+                });
+              }
             }
 
-            if (e.type === "throw") AD_SB.autodartsTriggers?.handleThrow?.(e);
-            else if (e.type === "state") AD_SB.autodartsTriggers?.handleState?.(e);
-            else if (e.type === "event") AD_SB.autodartsTriggers?.handleGameEvent?.(e);
+            if (e.type === "throw") AD_SB.admTriggers?.handleThrow?.(e);
+            else if (e.type === "state") AD_SB.admTriggers?.handleState?.(e);
+            else if (e.type === "event") AD_SB.admTriggers?.handleGameEvent?.(e);
 
             sendResponse({ ok: true });
             return;
@@ -532,7 +893,7 @@
             });
             AD_SB.capture?.ingestUi?.(msg.payload);
 
-            AD_SB.autodartsTriggers?.handleUiEvent?.(msg.payload);
+            AD_SB.admTriggers?.handleUiEvent?.(msg.payload);
             sendResponse({ ok: true });
             return;
           }
@@ -563,5 +924,10 @@
       logError("errors", "initial connection refresh failed", { error: String(e?.message || e) });
     }
     logInfo("system", "service worker initialized", {});
+    try {
+      AD_SB.workerModuleStatusLog?.extensionReady?.();
+    } catch {
+      // ignore
+    }
   };
 })(self);

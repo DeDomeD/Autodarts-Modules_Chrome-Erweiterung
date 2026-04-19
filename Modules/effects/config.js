@@ -12,6 +12,7 @@
       enableTriple: true,
       enableBull: true,
       enableDBull: true,
+      enableBullCheckout: true,
       enableT20: true,
       enableT19: true,
       enableT18: true,
@@ -25,7 +26,10 @@
       enableWinner: true,
       enableCorrection: true,
       enableMyTurnStart: true,
-      enableOpponentTurnStart: true
+      enableOpponentTurnStart: true,
+      myAutodartsUsername: "",
+      turnStartSbMode: "player_name",
+      turnStartSuffixTemplate: "{name} Turn"
     },
     actionDefaults: {
       miss: "Miss",
@@ -33,6 +37,10 @@
       tpl: "Triple",
       bull: "Bull",
       dbull: "DBull",
+      bull_checkout: "Leg-Checkout Bull",
+      bull_off_start: "Bull-Off Start",
+      bull_off_end: "Bull-Off Ende",
+      x01_game_start: "X01 Spielstart",
       t20: "T20",
       t19: "T19",
       t18: "T18",
@@ -58,6 +66,7 @@
         "enableTriple",
         "enableBull",
         "enableDBull",
+        "enableBullCheckout",
         "enableT20",
         "enableT19",
         "enableT18",
@@ -77,7 +86,10 @@
         missGuardThreshold: 40
       },
       modulesConfigString: {
-        customEffectsJson: "[]"
+        customEffectsJson: "[]",
+        myAutodartsUsername: "",
+        turnStartSbMode: "player_name",
+        turnStartSuffixTemplate: "{name} Turn"
       }
     }
   };

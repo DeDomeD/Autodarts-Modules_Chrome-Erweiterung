@@ -20,6 +20,7 @@
   let reconnectTimer = null;
   const RECONNECT_DELAY_MS = 2000;
   const MAX_AUTO_RETRIES = 5;
+  const SB_REACHABILITY_TIMEOUT_MS = 1200;
   let sbOutageActive = false;
   let sbRetryAttempts = 0;
   let sbRetryExhausted = false;
@@ -34,13 +35,37 @@
   const sbMessageListeners = new Set();
   const sbCustomEventSubscriptions = new Set();
 
+  /** Gleiche SB-Aktion (z. B. T20) oft 2x durch Custom+Default oder doppelte Custom-Regeln — einen kurzen Schutz. */
+  let lastSbFireDedupeSig = "";
+  let lastSbFireDedupeAt = 0;
+  const SB_FIRE_DEBOUNCE_MS = 260;
+  /** Gleicher finaler Action-Name (Named Turn vs. Key): 260ms reichen bei zwei State-Ticks nicht. */
+  let lastSbActionNameDedupe = "";
+  let lastSbActionNameDedupeAt = 0;
+  const SB_SAME_ACTION_NAME_MS = 950;
+
   function setSBStatus(next) {
+    const prevState = sbStatus.state;
     sbStatus.state = String(next?.state || sbStatus.state || "unknown");
     sbStatus.url = String(next?.url ?? sbStatus.url ?? "");
     sbStatus.lastError = String(next?.lastError ?? sbStatus.lastError ?? "");
     sbStatus.attempts = Number.isFinite(next?.attempts) ? next.attempts : sbRetryAttempts;
     sbStatus.exhausted = typeof next?.exhausted === "boolean" ? next.exhausted : sbRetryExhausted;
     sbStatus.lastChangeTs = Date.now();
+    try {
+      if (!shouldUseStreamerbot(AD_SB.getSettings?.())) return;
+      const u = sbStatus.url;
+      if (sbStatus.state === "connected" && prevState !== "connected") {
+        AD_SB.workerModuleStatusLog?.streamerbot?.(true, u);
+      } else if (
+        sbStatus.state === "disconnected" &&
+        (prevState === "connected" || prevState === "connecting")
+      ) {
+        AD_SB.workerModuleStatusLog?.streamerbot?.(false, u);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   function getSBStatus() {
@@ -93,6 +118,40 @@
     return installed.has("effects") || installed.has("overlay") || installed.has("obszoom");
   }
 
+  function toHttpProbeUrl(rawUrl) {
+    const value = String(rawUrl || "").trim();
+    if (!value) return "";
+    try {
+      const parsed = new URL(value);
+      const protocol = parsed.protocol === "wss:" ? "https:" : "http:";
+      return `${protocol}//${parsed.host}/`;
+    } catch {
+      return "";
+    }
+  }
+
+  async function canReachSBEndpoint(url, timeoutMs = SB_REACHABILITY_TIMEOUT_MS) {
+    const probeUrl = toHttpProbeUrl(url);
+    if (!probeUrl) return false;
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timeout = setTimeout(() => {
+      try { controller?.abort(); } catch {}
+    }, Math.max(300, Number(timeoutMs) || SB_REACHABILITY_TIMEOUT_MS));
+    try {
+      await fetch(probeUrl, {
+        method: "GET",
+        mode: "no-cors",
+        cache: "no-store",
+        signal: controller?.signal
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   function resetRetryState() {
     sbRetryAttempts = 0;
     sbRetryExhausted = false;
@@ -110,11 +169,9 @@
     sbHandshakeDone = true;
     sbAuthRequestId = "";
     setSBStatus({ state: "connected", url, lastError: "" });
-    const settings = AD_SB.getSettings?.() || {};
-    if (settings.debugActions || settings.debugAllLogs) {
-      console.log(`[Autodarts Modules] Streamer.bot connected (${url})`);
-    }
-    try { AD_SB.logger?.info?.("sb", "streamerbot ws ready", { queued: actionQueue.length }); } catch {}
+    try {
+      AD_SB.logger?.info?.("sb", "streamerbot connected", { url, queued: actionQueue.length });
+    } catch {}
     sbConnecting = false;
     sbOutageActive = false;
     clearReconnectTimer();
@@ -147,6 +204,50 @@
     for (const listener of Array.from(sbMessageListeners)) {
       try { listener(message); } catch {}
     }
+  }
+
+  /**
+   * Streamer.bot WebSocket: einmalige Action-Liste (GetActions).
+   * @returns {Promise<{ ok: boolean, actions?: Array<{ name?: string }>, error?: string }>}
+   */
+  function requestGetActions(timeoutMs = 4000) {
+    return new Promise((resolve) => {
+      if (!shouldUseStreamerbot()) {
+        resolve({ ok: false, error: "disabled" });
+        return;
+      }
+      if (!sbSocket || sbSocket.readyState !== WebSocket.OPEN || !sbHandshakeDone) {
+        ensureSBConnection();
+        resolve({ ok: false, error: "not_connected" });
+        return;
+      }
+      const id = makeId();
+      let done = false;
+      const ms = Math.max(800, Number(timeoutMs) || 4000);
+      const timer = setTimeout(() => finish({ ok: false, error: "timeout" }), ms);
+      const unsub = subscribeSBMessages((data) => {
+        if (String(data?.id || "") !== id) return;
+        const st = String(data?.status || "").toLowerCase();
+        if (st === "ok") {
+          const actions = Array.isArray(data?.actions) ? data.actions : [];
+          finish({ ok: true, actions });
+        } else {
+          finish({ ok: false, error: String(data?.error || data?.message || "get_actions_failed") });
+        }
+      });
+      function finish(result) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { unsub(); } catch {}
+        resolve(result);
+      }
+      try {
+        sbSocket.send(JSON.stringify({ request: "GetActions", id }));
+      } catch (e) {
+        finish({ ok: false, error: String(e?.message || e) });
+      }
+    });
   }
 
   function buildSubscriptionEventsObject() {
@@ -194,7 +295,7 @@
     try { AD_SB.logger?.warn?.("sb", "reconnect scheduled", { reason, delayMs: RECONNECT_DELAY_MS }); } catch {}
   }
 
-  function ensureSBConnection() {
+  async function ensureSBConnection() {
     const settings = AD_SB.getSettings();
     const url = String(settings?.sbUrl || "").trim();
     const password = String(settings?.sbPassword || "");
@@ -215,15 +316,19 @@
     sbRetryExhausted = false;
     setSBStatus({ state: "connecting", url, lastError: "" });
     try { AD_SB.logger?.info?.("sb", "connecting to streamerbot", { url }); } catch {}
+    const endpointReachable = await canReachSBEndpoint(url);
+    if (!endpointReachable) {
+      setSBStatus({ state: "disconnected", url, lastError: "connect_failed" });
+      sbConnecting = false;
+      sbSocket = null;
+      scheduleReconnect("connect_failed");
+      return;
+    }
 
     try {
       sbSocket = new WebSocket(url);
     } catch (e) {
       setSBStatus({ state: "disconnected", url, lastError: String(e?.message || e) });
-      if (!sbOutageActive) {
-        sbOutageActive = true;
-        console.warn("[Autodarts Modules] Streamer.bot disconnected, reconnecting...");
-      }
       try { AD_SB.logger?.error?.("errors", "failed to create streamerbot ws", { error: String(e?.message || e), url }); } catch {}
       sbConnecting = false;
       sbSocket = null;
@@ -290,10 +395,6 @@
 
     sbSocket.onclose = () => {
       setSBStatus({ state: "disconnected", url, lastError: "" });
-      if (!sbOutageActive) {
-        sbOutageActive = true;
-        console.warn("[Autodarts Modules] Streamer.bot disconnected, reconnecting...");
-      }
       try { AD_SB.logger?.warn?.("sb", "streamerbot ws closed", {}); } catch {}
       sbConnecting = false;
       sbHandshakeDone = false;
@@ -304,12 +405,11 @@
 
   function logAction(key, actionName, args) {
     const settings = AD_SB.getSettings();
-    if (!settings.debugActions && !settings.debugAllLogs) return;
     const normalizedKey = String(key || "").trim().toLowerCase();
-    if (!settings.debugAllLogs && (normalizedKey === "checkout" || normalizedKey.startsWith("checkout_"))) return;
-    const triggerLabel = formatActionTriggerLabel(key, args);
     const actionLabel = formatActionNameLabel(actionName, settings.actionPrefix);
-    console.log(`[Autodarts Modules = Effekte] AD Trigger ${triggerLabel} | SB Action = ${actionLabel}`);
+    try {
+      AD_SB.logger?.info?.("actions", "sb doAction", { key: normalizedKey, action: actionLabel });
+    } catch {}
   }
 
   function formatActionNameLabel(actionName, prefix) {
@@ -322,48 +422,31 @@
     return full;
   }
 
-  function formatComboLabel(combo) {
-    if (!Array.isArray(combo) || !combo.length) return "";
-    return combo
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value))
-      .sort((a, b) => a - b)
-      .join(",");
-  }
+  /** Wie OBS-Zoom-Zeile: blaue [ADM]-Bubble, grauer Text, Action-Name pink. */
+  const MIRROR_STYLE_ADM_BLUE =
+    "background:#2563eb;color:#f8fafc;padding:2px 7px;border-radius:8px;font-weight:700;font-size:11px";
+  const MIRROR_STYLE_SB_ACTION_MID = "color:#94a3b8;font-weight:500;font-size:12px";
+  const MIRROR_STYLE_SB_ACTION_NAME = "color:#ec4899;font-weight:700;font-size:12px";
 
-  function formatDartsLabel(darts) {
-    if (!Array.isArray(darts) || !darts.length) return "";
-    const names = darts
-      .map((dart) => String(dart?.segment || "").trim().toUpperCase())
-      .filter(Boolean);
-    return names.join(",");
-  }
-
-  function formatActionTriggerLabel(key, args = {}) {
-    const normalizedKey = String(key || "").trim().toLowerCase();
-    if (normalizedKey === "correction" || args?.effect === "undo_click") return "Undo";
-    if (normalizedKey === "waschmaschine") {
-      return formatComboLabel(args?.combo) || formatDartsLabel(args?.darts) || "Waschmaschine";
+  function pushMirrorSbActionSummary(actionName) {
+    const settings = AD_SB.getSettings?.() || {};
+    const label = formatActionNameLabel(actionName, settings.actionPrefix);
+    const safe = String(label || "").trim();
+    if (!safe) return;
+    const tail = [
+      { css: MIRROR_STYLE_ADM_BLUE, text: "[ADM]" },
+      { css: MIRROR_STYLE_SB_ACTION_MID, text: " SB Action " },
+      { css: MIRROR_STYLE_SB_ACTION_NAME, text: safe }
+    ];
+    try {
+      if (typeof AD_SB.triggerWorkerLog?.pushMirrorSegmentsWithSerial === "function") {
+        AD_SB.triggerWorkerLog.pushMirrorSegmentsWithSerial(tail, "SB");
+      } else {
+        AD_SB.workerMirrorLog?.pushEntry?.({ category: "SB", segments: tail });
+      }
+    } catch {
+      // ignore
     }
-    if (Array.isArray(args?.combo) && args.combo.length) {
-      return formatComboLabel(args.combo) || String(key || "").trim();
-    }
-    if (typeof args?.segment === "string" && args.segment.trim()) {
-      return args.segment.trim().toUpperCase();
-    }
-    if (typeof args?.recommendedSegment === "string" && args.recommendedSegment.trim()) {
-      return args.recommendedSegment.trim().toUpperCase();
-    }
-    if (typeof args?.recommendedThrow === "string" && args.recommendedThrow.trim()) {
-      return args.recommendedThrow.trim().toUpperCase();
-    }
-    if (typeof args?.event === "string" && args.event.trim()) {
-      return args.event.trim();
-    }
-    if (typeof args?.effect === "string" && args.effect.trim()) {
-      return args.effect.trim();
-    }
-    return String(key || "").trim();
   }
 
   function sendDoActionNow(actionName, args = {}) {
@@ -383,12 +466,25 @@
 
     try {
       sbSocket.send(JSON.stringify(payload));
+      pushMirrorSbActionSummary(actionName);
       try { AD_SB.logger?.info?.("actions", "action sent", { actionName }); } catch {}
     } catch (e) {
       console.error("[Autodarts Modules] send failed, re-queue:", e);
       try { AD_SB.logger?.error?.("errors", "action send failed", { actionName, error: String(e?.message || e) }); } catch {}
       actionQueue.push({ actionName, args });
     }
+  }
+
+  function shouldSkipDuplicateActionName(actionName) {
+    const n = String(actionName || "").trim();
+    if (!n) return false;
+    const t = Date.now();
+    if (n === lastSbActionNameDedupe && t - lastSbActionNameDedupeAt < SB_SAME_ACTION_NAME_MS) {
+      return true;
+    }
+    lastSbActionNameDedupe = n;
+    lastSbActionNameDedupeAt = t;
+    return false;
   }
 
   function fireActionByKey(key, args = {}) {
@@ -403,10 +499,64 @@
     if (!shouldUseStreamerbot(settings)) return;
 
     const actionName = settings.actionPrefix + suffix;
+    if (/(?:\bturn\b|\bzug\b)/i.test(actionName) && shouldSkipDuplicateActionName(actionName)) return;
+    const dedupeSig = `${String(key || "").toLowerCase()}|${actionName}`;
+    const dedupeNow = Date.now();
+    if (
+      dedupeSig === lastSbFireDedupeSig &&
+      dedupeNow - lastSbFireDedupeAt < SB_FIRE_DEBOUNCE_MS
+    ) {
+      return;
+    }
+    lastSbFireDedupeSig = dedupeSig;
+    lastSbFireDedupeAt = dedupeNow;
+
     logAction(key, actionName, args);
     try {
       AD_SB.logger?.info?.("actions", "action triggered", {
         key,
+        actionName,
+        effect: args?.effect ?? null
+      });
+    } catch {}
+
+    ensureSBConnection();
+
+    if (!sbSocket || sbSocket.readyState !== WebSocket.OPEN || !sbHandshakeDone) {
+      actionQueue.push({ actionName, args });
+      return;
+    }
+
+    sendDoActionNow(actionName, args);
+  }
+
+  /**
+   * Streamer.bot: Action-Suffix ist bereits der finale Name (wie in actions-Map), z. B. "Bot Level 9 Turn".
+   * Prefix wird wie bei fireActionByKey vorangestellt.
+   */
+  function fireActionBySuffix(suffix, args = {}) {
+    const settings = AD_SB.getSettings();
+    const clean = String(suffix || "").trim();
+    if (!clean) return;
+    if (!shouldUseStreamerbot(settings)) return;
+
+    const actionName = settings.actionPrefix + clean;
+    if (shouldSkipDuplicateActionName(actionName)) return;
+    const dedupeSig = `suffix|${actionName}`;
+    const dedupeNow = Date.now();
+    if (
+      dedupeSig === lastSbFireDedupeSig &&
+      dedupeNow - lastSbFireDedupeAt < SB_FIRE_DEBOUNCE_MS
+    ) {
+      return;
+    }
+    lastSbFireDedupeSig = dedupeSig;
+    lastSbFireDedupeAt = dedupeNow;
+
+    logAction("named_turn", actionName, args);
+    try {
+      AD_SB.logger?.info?.("actions", "action triggered", {
+        key: "named_turn",
         actionName,
         effect: args?.effect ?? null
       });
@@ -505,6 +655,7 @@
   }
 
   AD_SB.fireActionByKey = fireActionByKey;
+  AD_SB.fireActionBySuffix = fireActionBySuffix;
   AD_SB.connectOnceForTest = connectOnceForTest;
   AD_SB.ensureSBConnection = ensureSBConnection;
   AD_SB.subscribeSBMessages = subscribeSBMessages;
@@ -533,5 +684,6 @@
     try { AD_SB.refreshObsConnection?.(); } catch {}
   };
   AD_SB.getSBStatus = getSBStatus;
+  AD_SB.requestGetActions = requestGetActions;
   AD_SB.sha256Base64 = sha256Base64;
 })(self);

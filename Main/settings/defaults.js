@@ -27,19 +27,13 @@
     obsPassword: "",
     websiteApiUrl: DEFAULT_WEBSITE_API_URL,
     actionPrefix: "AD-SB ",
+    /** Logs-Overlay: Kategorie-Chips 0=minimal (1 Strich), 1=erweitert (2 Striche), 2=aus. Checkout Guide nur bei AD-Stufe 1. */
+    workerMirrorCatTiers: { AD: 0, SB: 0, OBS: 0, WLED: 0, MISC: 0 },
     uiLanguage: "de",
     accountToken: "",
     accountUserJson: "",
     installedModules,
 
-    onlyMyThrows: false,
-    myPlayerIndex: 0,
-
-    // Debug
-    debugAllLogs: false,
-    debugActions: true,
-    debugObs: false,
-    debugGameEvents: true,
     ...moduleDefaults,
 
     // Action suffix mapping (final action = prefix + suffix)

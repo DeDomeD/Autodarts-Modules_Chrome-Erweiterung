@@ -128,31 +128,120 @@ body{
 }
 
 .formRow{margin-top:10px}
-.obsZoomSceneSourceRow{
+/* WLED + allgemein: .hidden blendet Zeilen aus (Popup hatte dafuer keine Regel) */
+.formRow.hidden,
+#wledPadMultRow.hidden {
+  display: none !important;
+}
+/* S/D/T: nicht .choiceRow (2-Spalten-Grid), sondern eine Zeile nebeneinander */
+.wledPadMultStrip{
+  display:flex !important;
+  flex-direction:row;
+  flex-wrap:nowrap;
+  width:100%;
+  gap:6px;
+  align-items:stretch;
+  box-sizing:border-box;
+}
+.wledPadMultStrip .wledPadMultChip{
+  flex:1;
+  min-width:0;
+}
+.wledPadMultChip{
+  flex:1;
+  min-width:0;
+  padding:6px 6px;
+  font-weight:800;
+  font-size:13px;
+  letter-spacing:0.02em;
+}
+.wledPadToggleBtn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:44px;
+  padding:0 10px;
+  flex-shrink:0;
+}
+.wledPadToggleBtn svg{
+  display:block;
+  opacity:0.92;
+}
+.obsZoomSceneSourcePair{
   display:flex;
   gap:12px;
   align-items:flex-start;
+  width:100%;
 }
-.obsZoomSceneSourceRow .obsZoomSceneCol,
-.obsZoomSceneSourceRow .obsZoomSourceCol{
+.obsZoomScenePick,
+.obsZoomSourcePick{
   flex:1 1 0;
   min-width:0;
 }
-.obsZoomSceneSourceRow .obsZoomSourceCol{
-  text-align:right;
-}
-.obsZoomSceneSourceRow .obsZoomSourceCol .label{
-  text-align:right;
-}
-.obsZoomSceneSelectHead{
+.obsZoomSourceSelectRow{
   display:flex;
-  align-items:center;
-  justify-content:space-between;
   gap:8px;
+  align-items:center;
+}
+.obsZoomSourceSelectRow > .input{
+  flex:1 1 0;
+  min-width:0;
+  width:auto;
+}
+.obsZoomPlayerNameBtn{
+  width:100%;
+}
+.obsZoomPlayerFilterStatus{
+  line-height:1.35;
+}
+.obsZoomPlayerWhenLabel{
+  font-size:11px;
+  color:var(--muted);
   margin:0 0 6px;
 }
-.obsZoomSceneSelectHead .label{
+.obsZoomPlayerChips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+}
+.obsZoomPlayerChip{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  max-width:100%;
+  padding:4px 4px 4px 10px;
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  border:1px solid var(--stroke);
+  font-size:12px;
+  color:var(--text);
+}
+.obsZoomPlayerChipLabel{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:180px;
+}
+.obsZoomPlayerChipRemove{
+  flex-shrink:0;
+  width:26px;
+  height:26px;
   margin:0;
+  padding:0;
+  border:none;
+  border-radius:999px;
+  background:rgba(255,95,95,.2);
+  color:#ffb4b4;
+  font-size:16px;
+  line-height:1;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+.obsZoomPlayerChipRemove:hover{
+  filter:brightness(1.1);
 }
 .label{
   display:block;
@@ -189,6 +278,23 @@ body{
   border-color:rgba(25,199,255,.40);
   box-shadow:0 0 0 3px rgba(25,199,255,.12);
 }
+
+/* WLED: nur geöffnete Liste (option/optgroup) — geschlossenes Feld bleibt Standard-.input */
+#wledEffectTrigger option{
+  font-weight:500;
+  padding:8px 10px;
+  background:#0a101c;
+  color:var(--text);
+}
+#wledEffectTrigger optgroup{
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:rgba(147,197,253,.92);
+  background:#060a12;
+}
+
 .hint{
   margin-top:6px;
   font-size:11px;
@@ -267,6 +373,10 @@ body{
   border-radius:999px;
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.2);
 }
+#overlayPdcGlowHue.hueSlider{
+  width:min(100%,300px) !important;
+  flex:1 1 160px;
+}
 .hueSlider::-webkit-slider-runnable-track{
   height:16px;
   border-radius:999px;
@@ -315,9 +425,10 @@ body{
 .liTitle{
   font-weight:650;
   font-size:12.5px;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  line-height:1.35;
+  white-space:normal;
+  overflow:visible;
+  word-wrap:break-word;
 }
 .miniChevronBtn{
   margin-left:8px;
@@ -386,25 +497,6 @@ body{
   overflow:visible;
   word-wrap:break-word;
 }
-.marqueeOn{
-  overflow:hidden;
-  text-overflow:clip;
-}
-.marqueeTrack{
-  display:inline-flex;
-  align-items:center;
-  gap:28px;
-  min-width:max-content;
-  animation:marquee var(--marquee-duration,10s) linear infinite;
-}
-.marqueeItem{
-  white-space:nowrap;
-}
-@keyframes marquee{
-  from{transform:translateX(0)}
-  to{transform:translateX(calc(-50% - 14px))}
-}
-
 .grid2{
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -1724,4 +1816,328 @@ body{
 }
 .ligaTable tbody tr:hover{
   background:rgba(255,255,255,.03);
+}
+
+.swDevToolsHint{
+  font-size:11px;
+  color:var(--muted);
+  margin-top:8px;
+  line-height:1.4;
+  max-width:480px;
+}
+
+.workerLogSubdetails{
+  margin-top:10px;
+  border:1px solid var(--stroke);
+  border-radius:10px;
+  background:rgba(0,0,0,.12);
+  overflow:hidden;
+}
+.workerLogSubdetails.workerLogSubdetailsMuted{
+  opacity:.55;
+}
+.workerLogSubsummary{
+  cursor:pointer;
+  list-style:none;
+  padding:10px 12px;
+  font-weight:600;
+  font-size:13px;
+  color:var(--text);
+  user-select:none;
+}
+.workerLogSubsummary::-webkit-details-marker{
+  display:none;
+}
+.workerLogSubsummary::before{
+  content:"▸";
+  display:inline-block;
+  margin-right:8px;
+  transform:translateY(-1px);
+  color:var(--muted);
+  transition:transform .15s ease;
+}
+.workerLogSubdetails[open] .workerLogSubsummary::before{
+  transform:rotate(90deg) translate(1px,0);
+}
+.workerLogSubhint{
+  margin:0 12px 8px;
+  font-size:11px;
+}
+.workerLogSubPanel{
+  padding:4px 10px 10px 12px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.workerLogSubRow{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  cursor:pointer;
+  padding:6px 8px;
+  border-radius:8px;
+}
+.workerLogSubRow:hover{
+  background:rgba(255,255,255,.04);
+}
+.workerLogSubRow input{
+  width:16px;
+  height:16px;
+  accent-color:var(--accent);
+  flex-shrink:0;
+}
+.workerLogSubRow input:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+.workerLogSubRowTitle{
+  font-size:13px;
+  font-weight:600;
+  color:var(--text);
+}
+
+.mirrorLogWindowBody{
+  margin:0;
+  min-height:100vh;
+  background:rgba(3,7,12,.98);
+  position:static;
+  inset:auto;
+  width:100%;
+  height:auto;
+  max-height:none;
+  overflow:auto;
+}
+html:has(body.mirrorLogWindowBody){
+  height:auto;
+  max-height:none;
+  overflow:auto;
+}
+#mirrorWindowRoot{
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+}
+.workerMirrorStandaloneShell{
+  display:flex;
+  flex-direction:column;
+  min-height:100vh;
+  box-sizing:border-box;
+  background:rgba(3,7,12,.95);
+}
+.workerMirrorStandaloneShell .workerMirrorOverlayPanel{
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.workerMirrorOverlay{
+  position:fixed;
+  inset:0;
+  z-index:99999;
+  display:none;
+  flex-direction:column;
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
+  background:rgba(3,7,12,.95);
+  pointer-events:none;
+}
+.workerMirrorOverlay.isOpen{
+  display:flex;
+  pointer-events:auto;
+}
+.workerMirrorOverlayPanel{
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.workerMirrorOverlayFilters{
+  flex-shrink:0;
+  padding:8px 6px 10px 6px;
+  border-bottom:1px solid rgba(255,255,255,.1);
+  display:flex;
+  flex-direction:row;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+  background:rgba(6,10,18,.4);
+}
+.workerMirrorCatToggles{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  align-items:center;
+  flex:0 1 auto;
+}
+.workerMirrorCatBtn{
+  min-width:44px;
+  padding:5px 8px 4px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.06);
+  color:var(--muted);
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.4px;
+  cursor:pointer;
+  line-height:1.15;
+  display:inline-flex;
+  flex-direction:column;
+  align-items:center;
+  gap:3px;
+  box-sizing:border-box;
+}
+.workerMirrorCatBtnTxt{
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.4px;
+  line-height:1;
+}
+.workerMirrorCatBtnMeter{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  justify-content:center;
+  gap:3px;
+  height:4px;
+}
+.workerMirrorCatBtnMeter i{
+  display:block;
+  width:6px;
+  height:3px;
+  border-radius:2px;
+  background:rgba(255,255,255,.12);
+  font-style:normal;
+  transition:background .12s ease,opacity .12s ease;
+}
+.workerMirrorCatBtnMeter i.on{
+  background:rgba(25,199,255,.95);
+  box-shadow:0 0 6px rgba(25,199,255,.35);
+}
+.workerMirrorCatBtn--t0{
+  border-color:rgba(255,255,255,.2);
+  background:rgba(255,255,255,.05);
+  color:var(--text);
+  opacity:.92;
+}
+.workerMirrorCatBtn--t1{
+  border-color:rgba(25,199,255,.5);
+  background:rgba(25,199,255,.18);
+  color:var(--text);
+  opacity:1;
+}
+.workerMirrorCatBtn--t2{
+  border-color:rgba(255,255,255,.08);
+  border-style:dashed;
+  background:rgba(0,0,0,.15);
+  color:var(--muted);
+  opacity:.45;
+}
+.workerMirrorCatBtn--t2 .workerMirrorCatBtnMeter i.on{
+  background:transparent;
+  box-shadow:none;
+}
+.workerMirrorCatBtnAll{
+  min-width:38px;
+  padding:4px 6px 3px;
+  font-size:11px;
+  letter-spacing:.2px;
+}
+.workerMirrorFilterInput{
+  flex:1 1 140px;
+  min-width:120px;
+  width:auto;
+  margin:0;
+  font-size:12px;
+}
+.workerMirrorOverlayTop{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:10px 8px 8px 6px;
+  border-bottom:1px solid rgba(255,255,255,.1);
+  flex-shrink:0;
+  background:rgba(8,12,20,.35);
+}
+.workerMirrorOverlayTitle{
+  flex:1 1 auto;
+  font-size:14px;
+  font-weight:800;
+  letter-spacing:.2px;
+  color:var(--text);
+  min-width:0;
+  white-space:nowrap;
+}
+.workerMirrorOverlayToolbar{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:6px;
+  flex-shrink:0;
+}
+.workerMirrorOverlayToolbarMain{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:nowrap;
+}
+.workerMirrorOverlayCloseBtn{
+  width:34px;
+  height:34px;
+  padding:0;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.16);
+  background:rgba(8,12,20,.55);
+  color:#e9eef7;
+  font-size:22px;
+  font-weight:300;
+  line-height:1;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+.workerMirrorOverlayCloseBtn:hover{
+  filter:brightness(1.12);
+  border-color:rgba(25,199,255,.35);
+}
+.workerMirrorLogViewport{
+  max-height:min(360px,42vh);
+  overflow:auto;
+  margin:0 8px 10px;
+  padding:8px 10px;
+  font-family:ui-monospace,"Cascadia Code","Consolas",monospace;
+  font-size:11px;
+  line-height:1.5;
+  background:rgba(2,6,23,.72);
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,.08);
+  color:#e2e8f0;
+}
+.workerMirrorLogViewportOverlay{
+  flex:1;
+  min-height:0;
+  max-height:none;
+  overflow:auto;
+  overscroll-behavior:contain;
+  margin:0;
+  border-radius:0;
+  border:none;
+  background:rgba(2,6,23,.55);
+  text-align:left;
+  padding:6px 8px 8px 4px;
+}
+.workerMirrorLogLine{
+  white-space:pre-wrap;
+  word-break:break-word;
+  border-bottom:1px solid rgba(255,255,255,.06);
+  padding:5px 0;
+  text-align:left;
+}
+.workerMirrorLogLine:last-child{
+  border-bottom:none;
 }

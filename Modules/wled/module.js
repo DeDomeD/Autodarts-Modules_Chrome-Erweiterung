@@ -1,109 +1,64 @@
 (function initWledModule(scope) {
   scope.AD_SB_MODULES = scope.AD_SB_MODULES || {};
-  const TRIGGER_GROUP_COLLAPSED = {};
 
-  const WLED_TRIGGER_OPTIONS = [
-    { value: "miss", de: "Miss", en: "Miss" },
-    { value: "specialMiss", de: "Special Miss", en: "Special Miss" },
-    { value: "dbl", de: "Double", en: "Double" },
-    { value: "tpl", de: "Triple", en: "Triple" },
-    { value: "bull", de: "Bull", en: "Bull" },
-    { value: "dbull", de: "Double Bull", en: "Double Bull" },
-    { value: "t20", de: "T20", en: "T20" },
-    { value: "t19", de: "T19", en: "T19" },
-    { value: "t18", de: "T18", en: "T18" },
-    { value: "t17", de: "T17", en: "T17" },
-    { value: "high100", de: "High 100+", en: "High 100+" },
-    { value: "high140", de: "High 140+", en: "High 140+" },
-    { value: "oneeighty", de: "180", en: "180" },
-    { value: "noScore", de: "No Score", en: "No Score" },
-    { value: "waschmaschine", de: "Waschmaschine", en: "Waschmaschine" },
-    { value: "bust", de: "Bust", en: "Bust" },
-    { value: "winner", de: "Winner", en: "Winner" },
-    { value: "correction", de: "Korrektur", en: "Correction" },
-    { value: "myTurnStart", de: "Mein Zug", en: "My Turn Start" },
-    { value: "opponentTurnStart", de: "Gegner Zug", en: "Opponent Turn Start" }
-  ];
-  const WLED_TRIGGER_SUGGESTIONS = [
-    ...WLED_TRIGGER_OPTIONS.map((item) => item.value),
-    "throw",
-    "last_throw",
-    "gameon",
-    "takeout",
-    "takeout_finished",
-    "gameshot",
-    "gameshot+d10",
-    "gameshot+t20",
-    "matchshot",
-    "matchshot+bull",
-    "busted",
-    "outside",
-    "bot_throw",
-    "board_starting",
-    "board_started",
-    "board_stopping",
-    "board_stopped",
-    "calibration_started",
-    "calibration_finished",
-    "manual_reset_done",
-    "lobby_in",
-    "lobby_out",
-    "tournament_ready",
-    "range_100_180",
-    "180",
-    "140",
-    "s20",
-    "d10",
-    "t20",
-    "t19",
-    "t18",
-    "t17",
-    "t20_t20_t20",
-    "s20_s20_s20",
-    "d16_d16_d16",
-    "player_1",
-    "player_2",
-    "player_3",
-    "player_4",
-    "player_5",
-    "player_6"
-  ];
+  /**
+   * Nur Schluessel wie im Worker-Log: `admTriggerBus.emit` vereinheitlicht vor `__log`
+   * (`toUnifiedDispatchKey` in `adm-trigger-foundation.js`), dieselben Keys kommen bei WLED an.
+   * Siehe `Main/docs/adm-triggers-worker-background.md`.
+   */
+  /** UI-only Select-Werte → werden beim Speichern in echte Worker-Keys aufgeloest. */
+  const WLED_PAD_LEG = "__wled_pad_leg__";
+  /** Ein Eintrag „Wurf“: Single/Double/Triple waehlbar ueber S/D/T neben dem Zahlenfeld. */
+  const WLED_PAD_THROW = "__wled_pad_throw__";
+  const WLED_PAD_PLAYER = "__wled_pad_player__";
+  /** 2 Spieler: zwei Presets wechseln pro Visit; nach Leggewinn wieder mit Preset 1. */
+  const WLED_PAD_PLAYER_ALTERNATE = "__wled_pad_player_alternate__";
+  /** Drei Treffer eines Visits (beliebige Reihenfolge), z.B. drei Zahlen als Singles oder volle Segment-Tokens. */
+  const WLED_PAD_CHAIN = "__wled_pad_chain_visit__";
+
+  const WLED_PAD_SEGMENT_SELECTS = new Set([WLED_PAD_LEG, WLED_PAD_THROW]);
+
   const WLED_TRIGGER_GROUPS = [
     {
-      key: "main",
-      de: "Main Source",
-      en: "Main Source",
-      values: ["throw", "last_throw", "gameon", "myTurnStart", "opponentTurnStart", "manual_reset_done"]
+      key: "wledPad",
+      de: "Leggewinn, Wurf, Spieler, Trefferkette",
+      en: "Leg, throw, player, chain",
+      values: [WLED_PAD_LEG, WLED_PAD_THROW, WLED_PAD_CHAIN, WLED_PAD_PLAYER, WLED_PAD_PLAYER_ALTERNATE]
     },
     {
-      key: "finish",
-      de: "Checkouts",
-      en: "Checkouts",
-      values: ["takeout", "takeout_finished", "gameshot", "matchshot", "winner", "busted", "bust"]
+      key: "match",
+      de: "Match & Leg (weitere)",
+      en: "Match & leg (more)",
+      values: ["gameon", "busted", "bot_throw"]
     },
     {
-      key: "visit",
-      de: "Visit & Punkte",
-      en: "Visit & Points",
-      values: ["180", "140", "range_100_180", "high100", "high140", "oneeighty", "noScore", "waschmaschine"]
+      key: "checkout",
+      de: "Checkout",
+      en: "Checkout",
+      values: ["takeout"]
     },
     {
-      key: "segments",
-      de: "Segmente",
-      en: "Segments",
-      values: ["s20", "d10", "t20", "outside", "bull", "dbull", "dbl", "tpl"]
+      key: "board",
+      de: "Board & Session",
+      en: "Board & session",
+      values: [
+        "board_starting",
+        "board_started",
+        "board_stopping",
+        "board_stopped",
+        "calibration_started",
+        "calibration_finished",
+        "manual_reset_done",
+        "lobby_in",
+        "lobby_out",
+        "tournament_ready"
+      ]
     },
     {
-      key: "combo",
-      de: "Kombis & Spieler",
-      en: "Combos & Players",
-      values: ["player_1", "player_2", "player_3", "player_4", "bot_throw"]
-    },
-    {
-      key: "system",
-      de: "Board & System",
-      en: "Board & System",
-      values: ["board_starting", "board_started", "board_stopping", "board_stopped", "calibration_started", "calibration_finished", "lobby_in", "lobby_out", "tournament_ready"]
+      key: "gamemode",
+      de: "Gamemode",
+      en: "Gamemode",
+      values: ["x01_game_start", "bull_off_start", "bull_off_end"]
     }
   ];
 
@@ -117,7 +72,9 @@
     advancedJsonCollapsed: true,
     advancedJsonDraft: "",
     advancedJsonHelperMode: "player",
-    advancedJsonHelperHue: 210
+    advancedJsonHelperHue: 210,
+    wledPadMult: "t",
+    wledSegmentPadOpen: false
   };
 
   function getLang(settings) {
@@ -287,12 +244,23 @@
               }]
             : [];
           const presetTargets = normalizePresetTargets(item.presetTargets || legacyTargets, controllers);
+          let trigger = String(item.trigger || "").trim();
+          const playerFilter = String(item.playerFilter || "").trim();
+          if (normalizeConfiguredTrigger(trigger) === "throw" && playerFilter) {
+            trigger = "player_turn";
+          }
+          const chainRaw = item?.chainTriple;
+          const chainTriple = Array.isArray(chainRaw)
+            ? chainRaw.map((x) => normalizeSegmentToken(String(x || ""))).filter(Boolean)
+            : [];
           return {
             id: String(item.id || "").trim(),
             name: String(item.name || "").trim(),
-            trigger: String(item.trigger || "").trim(),
+            trigger,
             presetTargets,
             advancedJson: String(item.advancedJson || "").trim(),
+            playerFilter,
+            chainTriple: chainTriple.length === 3 ? chainTriple : [],
             enabled: item.enabled !== false
           };
         })
@@ -320,15 +288,143 @@
   function getTriggerLabel(trigger, settings) {
     const lang = getLang(settings);
     const normalized = normalizeConfiguredTrigger(trigger);
+    if (normalized === WLED_PAD_LEG) return lang === "en" ? "Leg win (+ last dart)" : "Leggewinn (+ letzter Treffer)";
+    if (normalized === WLED_PAD_THROW) return lang === "en" ? "Throw (S / D / T + field)" : "Wurf (S / D / T + Feld)";
+    if (normalized === WLED_PAD_PLAYER) return lang === "en" ? "Player (name filter)" : "Spieler (Namensfilter)";
+    if (normalized === WLED_PAD_PLAYER_ALTERNATE) {
+      return lang === "en" ? "Player (alternate)" : "Spieler (Wechsel)";
+    }
+    if (normalized === WLED_PAD_CHAIN) {
+      return lang === "en" ? "Hit chain" : "Trefferkette";
+    }
     const playerMatch = normalized.match(/^(player|spieler)_(\d+)$/);
     if (playerMatch) {
       const number = Number(playerMatch[2]);
       if (number >= 1) {
-        return lang === "en" ? `Player ${number}` : `Spieler ${number}`;
+        return lang === "en" ? `Player ${number} (name key)` : `Spieler ${number} (Namens-Key)`;
       }
     }
-    const entry = WLED_TRIGGER_OPTIONS.find((item) => item.value === trigger);
-    return entry ? (lang === "en" ? entry.en : entry.de) : trigger;
+    const combo = normalized.match(/^(gameshot|matchshot)\+(.+)$/);
+    if (combo) {
+      const head = combo[1] === "gameshot" ? (lang === "en" ? "Leg win" : "Leggewinn") : (lang === "en" ? "Match win" : "Matchgewinn");
+      return `${head} + ${combo[2]}`;
+    }
+    const seg = normalized.match(/^([sdt])(\d+)$/);
+    if (seg) {
+      const n = seg[2];
+      if (seg[1] === "s") return lang === "en" ? `Single ${n}` : `Single ${n}`;
+      if (seg[1] === "d") return lang === "en" ? `Double ${n}` : `Double ${n}`;
+      return lang === "en" ? `Triple ${n}` : `Triple ${n}`;
+    }
+    const labels = {
+      chain_visit: {
+        de: "Trefferkette",
+        en: "Hit chain"
+      },
+      player_turn_alternate: {
+        de: "Spieler Wechsel (2 Presets, nur 2 Spieler)",
+        en: "Player alternate (2 presets, 2 players only)"
+      },
+      gameon: { de: "Game ON", en: "Game ON" },
+      gameshot: { de: "Leggewinn", en: "Leg shot / win" },
+      matchshot: { de: "Matchgewinn", en: "Match shot / win" },
+      busted: { de: "Bust", en: "Bust" },
+      bot_throw: { de: "Bot-Wurf", en: "Bot throw" },
+      takeout: { de: "Checkout / Takeout", en: "Checkout / takeout" },
+      takeout_finished: { de: "Takeout fertig (alt)", en: "Takeout finished (legacy)" },
+      throw: { de: "Wurf meta (alt)", en: "Throw meta (legacy)" },
+      player_turn: { de: "Spieler am Zug (alt)", en: "Player turn (legacy)" },
+      outside: { de: "Outside (alt)", en: "Outside (legacy)" },
+      double: { de: "Double (alt)", en: "Double (legacy)" },
+      triple: { de: "Triple (alt)", en: "Triple (legacy)" },
+      bull: { de: "Bull (alt)", en: "Bull (legacy)" },
+      bull_checkout: { de: "Bull-Checkout (alt)", en: "Bull checkout (legacy)" },
+      checkout: { de: "Checkout (Roh-Event)", en: "Checkout (raw event)" },
+      board_starting: { de: "Board startet", en: "Board starting" },
+      board_started: { de: "Board gestartet", en: "Board started" },
+      board_stopping: { de: "Board stoppt", en: "Board stopping" },
+      board_stopped: { de: "Board gestoppt", en: "Board stopped" },
+      calibration_started: { de: "Kalibrierung start", en: "Calibration started" },
+      calibration_finished: { de: "Kalibrierung Ende", en: "Calibration finished" },
+      manual_reset_done: { de: "Manueller Reset", en: "Manual reset done" },
+      lobby_in: { de: "Lobby rein", en: "Lobby in" },
+      lobby_out: { de: "Lobby raus", en: "Lobby out" },
+      tournament_ready: { de: "Turnier bereit", en: "Tournament ready" },
+      x01_game_start: {
+        de: "X01 Spielstart (Game ON, kein Cork)",
+        en: "X01 game start (Game ON, not cork)"
+      },
+      bull_off_start: { de: "Bull-Off Start", en: "Bull-off start" },
+      bull_off_end: { de: "Bull-Off Ende", en: "Bull-off end" }
+    };
+    const row = labels[normalized];
+    if (row) return lang === "en" ? row.en : row.de;
+    return trigger;
+  }
+
+  /**
+   * Kurzer Hover-Text (title) pro Trigger-Option — Beispiele wie in Worker/Log ueblich.
+   */
+  function getTriggerOptionHint(value, settings) {
+    const lang = getLang(settings);
+    const v = normalizeConfiguredTrigger(value);
+    const H = {
+      [WLED_PAD_LEG]: {
+        de: "Leggewinn inkl. letztem Checkout-Treffer. Beispiel: D20 auswaehlen → Trigger gameshot+d20 (wie Leggewinn + D20 im Log).",
+        en: "Leg win including checkout dart. Example: pick D20 → trigger gameshot+d20 (same idea as leg win + D20 in the log)."
+      },
+      [WLED_PAD_THROW]: {
+        de: "Ein einzelner Wurf wie im Worker (t20, d16, outside, …). Beispiel: Triple 20 → t20.",
+        en: "One throw segment as in the worker (t20, d16, outside, …). Example: triple 20 → t20."
+      },
+      [WLED_PAD_CHAIN]: {
+        de: "Nach dem 3. Dart eines Visits: drei Treffer in beliebiger Reihenfolge. Beispiel Waschmaschine: drei passende Segmente eintragen (z.B. nur drei Zahlen 1 20 5 als Singles).",
+        en: "After the 3rd dart of a visit: three hits in any order. Waschmaschine-style: enter three matching segments (e.g. three numbers 1 20 5 as singles)."
+      },
+      [WLED_PAD_PLAYER]: {
+        de: "Einmal pro Aufnahme wenn der aktive Spielername den Filter enthaelt. Beispiel: alex → trifft auf „Alex Müller“.",
+        en: "Once per visit if the active player name contains the filter. Example: alex matches “Alex Smith”."
+      },
+      [WLED_PAD_PLAYER_ALTERNATE]: {
+        de: "Nur 2 Spieler: genau 2 Presets (A/B), nach Leggewinn wieder Preset 1, dann Wechsel pro Zug.",
+        en: "2 players only: exactly 2 presets (A/B); after a leg win starts with preset 1, then alternates each visit."
+      },
+      gameon: {
+        de: "Spiel / Match laeuft (Game ON).",
+        en: "Game is live (game on)."
+      },
+      busted: {
+        de: "Bust (Ueberwurf).",
+        en: "Bust (score over remaining)."
+      },
+      bot_throw: {
+        de: "Wurf eines Bot-/CPU-Spielers.",
+        en: "Throw from a bot / CPU player."
+      },
+      takeout: {
+        de: "Checkout / Takeout aktiv (Worker-Key takeout).",
+        en: "Checkout / takeout in progress (worker key takeout)."
+      },
+      board_starting: { de: "Board startet.", en: "Board is starting." },
+      board_started: { de: "Board gestartet.", en: "Board started." },
+      board_stopping: { de: "Board stoppt.", en: "Board is stopping." },
+      board_stopped: { de: "Board gestoppt.", en: "Board stopped." },
+      calibration_started: { de: "Kalibrierung beginnt.", en: "Calibration started." },
+      calibration_finished: { de: "Kalibrierung fertig.", en: "Calibration finished." },
+      manual_reset_done: { de: "Manueller Reset / Korrektur.", en: "Manual reset / correction." },
+      lobby_in: { de: "Lobby / Warteraum betreten.", en: "Entered lobby / waiting room." },
+      lobby_out: { de: "Lobby verlassen.", en: "Left lobby." },
+      tournament_ready: { de: "Turnier bereit.", en: "Tournament ready." },
+      x01_game_start: {
+        de: "X01-Spielstart (nach Bull-Off etc.).",
+        en: "X01 game start (after bull-off, etc.)."
+      },
+      bull_off_start: { de: "Bull-Off / Cork beginnt.", en: "Bull-off / cork begins." },
+      bull_off_end: { de: "Bull-Off / Cork endet.", en: "Bull-off / cork ends." }
+    };
+    const row = H[v];
+    if (!row) return "";
+    return lang === "en" ? row.en : row.de;
   }
 
   function getAllLoadedPresets(settings) {
@@ -367,74 +463,389 @@
     }
   }
 
-  function renderTriggerSuggestions(settings) {
-    const lang = getLang(settings);
-    return WLED_TRIGGER_SUGGESTIONS
-      .map((value) => {
-        const playerMatch = String(value).match(/^player_(\d+)$/);
-        if (playerMatch) {
-          const number = Number(playerMatch[1]);
-          const label = lang === "en" ? `Player ${number}` : `Spieler ${number}`;
-          return `<option value="${value}" label="${label}"></option>`;
-        }
-        const item = WLED_TRIGGER_OPTIONS.find((entry) => entry.value === value);
-        const label = item ? (lang === "en" ? item.en : item.de) : value;
-        return `<option value="${value}" label="${label}"></option>`;
-      })
-      .join("");
-  }
-
   function normalizeConfiguredTrigger(value) {
     return String(value || "").trim().toLowerCase();
   }
 
-  function getPlayerTriggerHintText(value, settings) {
+  function normalizeSegmentToken(raw) {
+    let s = normalizeConfiguredTrigger(raw).replace(/\s+/g, "");
+    if (!s) return "";
+    if (s === "d25" || s === "dbull" || s === "doublebull") s = "bull";
+    return s;
+  }
+
+  function isValidLegSuffix(s) {
+    if (!s) return false;
+    if (s === "outside" || s === "bull" || s === "dbull") return true;
+    if (/^(s25|t25)$/.test(s)) return true;
+    return /^[sdt](?:[1-9]|1[0-9]|20)$/.test(s);
+  }
+
+  function isValidThrowSegment(s) {
+    return isValidLegSuffix(s);
+  }
+
+  function getWledSelectMode(root) {
+    return normalizeConfiguredTrigger(root.querySelector("#wledEffectTrigger")?.value);
+  }
+
+  function getEffectivePadMult(root) {
+    void root;
+    return wledUiState.wledPadMult || "t";
+  }
+
+  function setWledSegmentField(root, text) {
+    const el = root.querySelector("#wledSegmentField");
+    if (el) el.value = text || "";
+  }
+
+  function apiGetSettingsSafe(root) {
+    void root;
+    try {
+      return scope.AD_SB_MODULES?.wled?._delegateApi?.getSettings?.() || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function setWledSegmentPadPopoverOpen(root, open, settings) {
+    const s = settings || apiGetSettingsSafe(root);
+    const lang = getLang(s);
+    wledUiState.wledSegmentPadOpen = !!open;
+    const body = root.querySelector("#wledSegmentPadBody");
+    const tgl = root.querySelector("#wledSegmentPadToggle");
+    if (body) {
+      body.classList.toggle("hidden", !open);
+      body.hidden = !open;
+    }
+    if (tgl) {
+      tgl.setAttribute("aria-expanded", open ? "true" : "false");
+      tgl.setAttribute(
+        "aria-label",
+        open
+          ? (lang === "en" ? "Close keypad" : "Tastenfeld schliessen")
+          : (lang === "en" ? "Open keypad" : "Tastenfeld oeffnen")
+      );
+      tgl.title = open
+        ? (lang === "en" ? "Close keypad" : "Tastenfeld schliessen")
+        : (lang === "en" ? "Open keypad" : "Tastenfeld oeffnen");
+    }
+  }
+
+  function syncWledPadMultUi(root) {
+    const sel = getWledSelectMode(root);
+    const row = root.querySelector("#wledPadMultRow");
+    if (row) {
+      const showMult = sel === WLED_PAD_LEG || sel === WLED_PAD_THROW;
+      row.classList.toggle("hidden", !showMult);
+      row.hidden = !showMult;
+    }
+    root.querySelectorAll("[data-wled-pad-mult]").forEach((btn) => {
+      const m = String(btn.dataset.wledPadMult || "").toLowerCase();
+      btn.classList.toggle("active", m === (wledUiState.wledPadMult || "t"));
+    });
+  }
+
+  function onWledTriggerSelectChange(root, settings) {
+    const s = settings || apiGetSettingsSafe(root);
+    const lang = getLang(s);
+    const sel = getWledSelectMode(root);
+    const segRow = root.querySelector("#wledSegmentPadRow");
+    const pfRow = root.querySelector("#wledPlayerFilterRow");
+    const hintSeg = root.querySelector("#wledSegmentPadHint");
+    const hintPf = root.querySelector("#wledPlayerFilterHint");
+
+    if (sel === WLED_PAD_PLAYER) {
+      setWledSegmentPadPopoverOpen(root, false, s);
+      if (segRow) {
+        segRow.classList.add("hidden");
+        segRow.hidden = true;
+      }
+      const chainRowP = root.querySelector("#wledChainTripleRow");
+      if (chainRowP) {
+        chainRowP.classList.add("hidden");
+        chainRowP.hidden = true;
+      }
+      const altRow = root.querySelector("#wledAlternateLogicRow");
+      if (altRow) {
+        altRow.classList.add("hidden");
+        altRow.hidden = true;
+      }
+      if (pfRow) {
+        pfRow.classList.remove("hidden");
+        pfRow.hidden = false;
+      }
+      if (hintPf) {
+        hintPf.textContent = lang === "en"
+          ? "Once per visit if the active player name contains this text (case-insensitive). For different LEDs per person, add one effect per person with a different filter — works even if Autodarts or other modules change column order or box positions."
+          : "Einmal pro Aufnahme, wenn der aktive Spielername diesen Text enthaelt (ohne Gross/Kleinschreibung). Verschiedene LEDs pro Person: je einen Effekt mit eigenem Namensfilter — unabhaengig von Spalten-Tausch oder verschobenen Boxen durch andere Module.";
+      }
+      setWledSegmentField(root, "");
+      return;
+    }
+
+    if (sel === WLED_PAD_CHAIN) {
+      setWledSegmentPadPopoverOpen(root, false, s);
+      if (segRow) {
+        segRow.classList.add("hidden");
+        segRow.hidden = true;
+      }
+      const chainRow = root.querySelector("#wledChainTripleRow");
+      const chainHint = root.querySelector("#wledChainTripleHint");
+      if (chainRow) {
+        chainRow.classList.remove("hidden");
+        chainRow.hidden = false;
+      }
+      if (chainHint) {
+        chainHint.textContent = lang === "en"
+          ? "Exactly three hits for one visit (any order). Example: three numbers 1 20 5 as singles, or full segment tokens. Fires after the 3rd dart of the visit."
+          : "Genau drei Treffer einer Aufnahme (beliebige Reihenfolge), z.B. drei Zahlen 1 20 5 als Singles oder volle Segment-Tokens. Ausloesung nach dem 3. Dart des Visits.";
+      }
+      if (pfRow) {
+        pfRow.classList.add("hidden");
+        pfRow.hidden = true;
+      }
+      const pfiC = root.querySelector("#wledPlayerFilterInput");
+      if (pfiC) pfiC.value = "";
+      const altRowC = root.querySelector("#wledAlternateLogicRow");
+      if (altRowC) {
+        altRowC.classList.add("hidden");
+        altRowC.hidden = true;
+      }
+      setWledSegmentField(root, "");
+      return;
+    }
+
+    if (sel === WLED_PAD_PLAYER_ALTERNATE) {
+      setWledSegmentPadPopoverOpen(root, false, s);
+      if (segRow) {
+        segRow.classList.add("hidden");
+        segRow.hidden = true;
+      }
+      const chainRowAlt = root.querySelector("#wledChainTripleRow");
+      if (chainRowAlt) {
+        chainRowAlt.classList.add("hidden");
+        chainRowAlt.hidden = true;
+      }
+      if (pfRow) {
+        pfRow.classList.add("hidden");
+        pfRow.hidden = true;
+      }
+      const pfiAlt = root.querySelector("#wledPlayerFilterInput");
+      if (pfiAlt) pfiAlt.value = "";
+      const altRow = root.querySelector("#wledAlternateLogicRow");
+      const altHint = root.querySelector("#wledAlternateLogicHint");
+      if (altRow) {
+        altRow.classList.remove("hidden");
+        altRow.hidden = false;
+      }
+      if (altHint) {
+        altHint.textContent = lang === "en"
+          ? "Exactly two presets required (1st = first visit after each leg start, 2nd = next player, then alternating). Only runs when the match has two participants; not during bull-off."
+          : "Es muessen genau zwei Presets gewaehlt sein (1. = erster Zug nach Leggewinn/Spielstart, 2. = naechster Spieler, danach im Wechsel). Nur bei zwei Teilnehmern; nicht im Bull-Off.";
+      }
+      setWledSegmentField(root, "");
+      return;
+    }
+
+    const altRowHide = root.querySelector("#wledAlternateLogicRow");
+    if (altRowHide) {
+      altRowHide.classList.add("hidden");
+      altRowHide.hidden = true;
+    }
+
+    if (pfRow) {
+      pfRow.classList.add("hidden");
+      pfRow.hidden = true;
+    }
+    const pfi = root.querySelector("#wledPlayerFilterInput");
+    if (pfi) pfi.value = "";
+
+    if (WLED_PAD_SEGMENT_SELECTS.has(sel)) {
+      const chainRowSeg = root.querySelector("#wledChainTripleRow");
+      if (chainRowSeg) {
+        chainRowSeg.classList.add("hidden");
+        chainRowSeg.hidden = true;
+      }
+      if (segRow) {
+        segRow.classList.remove("hidden");
+        segRow.hidden = false;
+      }
+      wledUiState.wledPadMult = "t";
+      setWledSegmentField(root, "");
+      syncWledPadMultUi(root);
+      setWledSegmentPadPopoverOpen(root, false, s);
+      if (hintSeg) {
+        if (sel === WLED_PAD_LEG) {
+          hintSeg.textContent = lang === "en"
+            ? "Last dart for leg win — type a key or open the keypad (button)."
+            : "Letzter Treffer beim Leggewinn — eintippen oder Tastenfeld ueber den Button oeffnen.";
+        } else {
+          hintSeg.textContent = lang === "en"
+            ? "Throw segment (worker log). Open keypad for S / D / T, numbers, Miss (no score), Outside, DBull."
+            : "Wurf-Segment wie im Log. Tastenfeld: S / D / T, Zahlen, Miss (kein Treffer), Outside, DBull.";
+        }
+      }
+      return;
+    }
+
+    setWledSegmentPadPopoverOpen(root, false, s);
+    if (segRow) {
+      segRow.classList.add("hidden");
+      segRow.hidden = true;
+    }
+    const chainRowEnd = root.querySelector("#wledChainTripleRow");
+    if (chainRowEnd) {
+      chainRowEnd.classList.add("hidden");
+      chainRowEnd.hidden = true;
+    }
+    setWledSegmentField(root, "");
+  }
+
+  function applyPadNumber(root, n) {
+    const mult = getEffectivePadMult(root);
+    const sel = getWledSelectMode(root);
+    let tok = "";
+    if (n === 25) {
+      if (mult === "s") tok = "s25";
+      else if (mult === "d") tok = "bull";
+      else tok = "t25";
+    } else {
+      tok = `${mult}${n}`;
+    }
+    setWledSegmentField(root, tok);
+  }
+
+  function applyPadSpecial(root, kind) {
+    const sel = getWledSelectMode(root);
+    if (!WLED_PAD_SEGMENT_SELECTS.has(sel)) return;
+    const k = String(kind || "").toLowerCase();
+    let tok = "outside";
+    if (k === "miss") tok = "outside";
+    else if (k === "dbull") tok = "dbull";
+    else if (k === "bull") tok = "bull";
+    setWledSegmentField(root, tok);
+  }
+
+  function parseChainTripleFromForm(root) {
+    const raw = String(root.querySelector("#wledChainTripleInput")?.value || "").trim();
+    if (!raw) return { ok: false };
+    const parts = raw.split(/[\s,;+]+/).map((x) => x.trim()).filter(Boolean);
+    if (parts.length !== 3) return { ok: false };
+    const out = [];
+    for (const p0 of parts) {
+      if (/^\d+$/.test(p0)) {
+        const n = parseInt(p0, 10);
+        if (!Number.isFinite(n) || n < 1 || (n > 20 && n !== 25)) return { ok: false };
+        if (n === 25) out.push("s25");
+        else out.push(`s${n}`);
+        continue;
+      }
+      const p = normalizeSegmentToken(p0);
+      if (!isValidThrowSegment(p)) return { ok: false };
+      out.push(p);
+    }
+    if (out.length !== 3) return { ok: false };
+    return { ok: true, triple: out };
+  }
+
+  function composeWledEffectFromForm(root) {
+    const sel = getWledSelectMode(root);
+    if (!sel) return { ok: false, code: "no_trigger" };
+
+    if (sel === WLED_PAD_PLAYER) {
+      const pf = String(root.querySelector("#wledPlayerFilterInput")?.value || "").trim();
+      if (!pf) return { ok: false, code: "player_empty" };
+      return { ok: true, trigger: "player_turn", playerFilter: pf };
+    }
+
+    if (sel === WLED_PAD_PLAYER_ALTERNATE) {
+      return { ok: true, trigger: "player_turn_alternate", playerFilter: "" };
+    }
+
+    if (sel === WLED_PAD_CHAIN) {
+      const parsed = parseChainTripleFromForm(root);
+      if (!parsed.ok) return { ok: false, code: "chain_bad" };
+      return { ok: true, trigger: "chain_visit", playerFilter: "", chainTriple: parsed.triple };
+    }
+
+    if (WLED_PAD_SEGMENT_SELECTS.has(sel)) {
+      const raw = normalizeSegmentToken(root.querySelector("#wledSegmentField")?.value || "");
+      if (!raw) return { ok: false, code: "segment_empty" };
+      if (sel === WLED_PAD_LEG) {
+        if (!isValidLegSuffix(raw)) return { ok: false, code: "segment_bad" };
+        return { ok: true, trigger: `gameshot+${raw}`, playerFilter: "" };
+      }
+      if (raw === "outside" || raw === "bull" || raw === "dbull") {
+        return { ok: true, trigger: raw, playerFilter: "" };
+      }
+      if (!isValidThrowSegment(raw)) return { ok: false, code: "segment_bad" };
+      return { ok: true, trigger: raw, playerFilter: "" };
+    }
+
+    return { ok: true, trigger: sel, playerFilter: "" };
+  }
+
+  function getEffectTriggerSummary(item, settings) {
+    const t = normalizeConfiguredTrigger(item.trigger);
+    const pf = String(item.playerFilter || "").trim();
+    if (t === "player_turn_alternate") {
+      const lang = getLang(settings);
+      return lang === "en"
+        ? "2 players: presets alternate each visit; after a leg starts with preset 1"
+        : "2 Spieler: Presets wechseln pro Zug; nach Leggewinn mit Preset 1";
+    }
+    if (t === "chain_visit" && Array.isArray(item.chainTriple) && item.chainTriple.length === 3) {
+      const lang = getLang(settings);
+      const s = item.chainTriple.map((x) => String(x || "").toUpperCase()).join(" ");
+      return lang === "en"
+        ? `Hit chain ${s} (visit, any order)`
+        : `Trefferkette ${s} (Aufnahme, Reihenfolge egal)`;
+    }
+    const turnNameFilter = t === "player_turn" || (t === "throw" && pf);
+    if (turnNameFilter && pf) {
+      const lang = getLang(settings);
+      return lang === "en"
+        ? `Player name contains „${pf}“ (once per visit)`
+        : `Spielername enthaelt „${pf}“ (einmal pro Aufnahme)`;
+    }
+    return getTriggerLabel(item.trigger, settings);
+  }
+
+  function renderWledPadNumberGrid() {
+    let html = "";
+    for (let n = 1; n <= 20; n += 1) {
+      html += `<button type="button" class="btnMini wledPadNumBtn" data-wled-pad-num="${n}">${n}</button>`;
+    }
+    return html;
+  }
+
+  function formatWledPresetLineForLog(targets) {
+    const list = Array.isArray(targets) ? targets : [];
+    if (!list.length) return "";
+    return list
+      .map((x) => {
+        const pn = String(x?.presetName || "").trim();
+        const pid = String(x?.presetId || "").trim();
+        const cn = String(x?.controllerName || "").trim();
+        const p = pn || (pid ? `Preset ${pid}` : "?");
+        return cn ? `${p} (${cn})` : p;
+      })
+      .join(", ");
+  }
+
+  function renderTriggerDropdownOptions(settings) {
     const lang = getLang(settings);
-    const normalized = normalizeConfiguredTrigger(value);
-    if (!/^player_[12]$/.test(normalized) && !/^spieler_[12]$/.test(normalized)) return "";
-    return lang === "en"
-      ? "You can also use player_3, player_4, player_5 and more."
-      : "Du kannst genauso auch player_3, player_4, player_5 usw. verwenden.";
-  }
-
-  function updateTriggerFieldHint(root, settings) {
-    const input = root.querySelector("#wledEffectTrigger");
-    const hint = root.querySelector("#wledEffectTriggerDynamicHint");
-    if (!hint) return;
-    hint.textContent = getPlayerTriggerHintText(input?.value, settings);
-    hint.style.display = hint.textContent ? "" : "none";
-  }
-
-  function isTriggerGroupCollapsed(groupKey) {
-    return TRIGGER_GROUP_COLLAPSED[groupKey] !== false;
-  }
-
-  function renderTriggerPickerGroups(settings) {
-    const lang = getLang(settings);
-    return `
-      <div class="triggerPicker">
-        ${WLED_TRIGGER_GROUPS.map((group) => `
-          <div class="triggerGroup">
-            <button
-              type="button"
-              class="triggerGroupHeader"
-              data-wled-trigger-group-toggle="${group.key}"
-              aria-expanded="${isTriggerGroupCollapsed(group.key) ? "false" : "true"}"
-            >
-              <span class="triggerGroupTitle">${lang === "en" ? group.en : group.de}</span>
-              <span class="triggerGroupArrow">${isTriggerGroupCollapsed(group.key) ? "v" : "^"}</span>
-            </button>
-            <div class="triggerChipRow${isTriggerGroupCollapsed(group.key) ? " hidden" : ""}">
-              ${group.values.map((value) => `
-                <button type="button" class="triggerChip" data-wled-trigger-pick="${value}">
-                  <span class="triggerChipValue">${getTriggerLabel(value, settings)}</span>
-                </button>
-              `).join("")}
-            </div>
-          </div>
-        `).join("")}
-      </div>
-    `;
+    return WLED_TRIGGER_GROUPS.map((group) => `
+      <optgroup label="${lang === "en" ? group.en : group.de}">
+        ${group.values.map((value) => {
+          const hint = getTriggerOptionHint(value, settings);
+          const titleAttr = hint ? ` title="${escapeWledAttr(hint)}"` : "";
+          return `
+          <option value="${escapeWledAttr(value)}"${titleAttr}>${getTriggerLabel(value, settings)}</option>`;
+        }).join("")}
+      </optgroup>
+    `).join("");
   }
 
   function formatPresetName(item) {
@@ -511,42 +922,77 @@
     `;
   }
 
+  function escapeWledAttr(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   function renderControllers(settings) {
+    const lang = getLang(settings);
     const controllers = getControllers(settings);
-    return controllers.map((controller, index) => `
-      <div class="card" style="margin-top:${index === 0 ? 0 : 12}px;">
-        <button
-          type="button"
-          class="listItem"
-          data-wled-toggle-controller="${controller.id}"
-          style="padding:0;background:transparent;border:none;"
-          aria-expanded="${isControllerCollapsed(controller.id) ? "false" : "true"}"
-        >
-          <div class="liText" style="padding:0;">
-            <div class="liTitle">${getControllerLabel(controller, settings, index)}</div>
+    return controllers.map((controller, index) => {
+      const collapsed = isControllerCollapsed(controller.id);
+      const title = escapeWledAttr(getControllerLabel(controller, settings, index));
+      const namePh = lang === "en" ? "Optional display name" : "Optionaler Anzeigename";
+      const endpointPh = "http://192.168.178.50";
+      const nameLbl = lang === "en" ? "Display name" : "Anzeigename";
+      const endpointLbl = lang === "en" ? "IP / HTTP endpoint" : "IP / HTTP-Endpoint";
+      const hintEndpoint = lang === "en"
+        ? "WLED IP or full HTTP endpoint."
+        : "WLED IP oder kompletter HTTP-Endpoint.";
+      const dd = collapsed ? "v" : "^";
+      return `
+      ${index > 0 ? '<div class="divider"></div>' : ""}
+      <div class="wledSettingsControllerBlock" data-wled-settings-controller="${controller.id}">
+        <div class="sectionHead" style="margin-top:${index === 0 ? "0" : "10px"};">
+          <div class="sectionTitle" style="margin:0;">${title}</div>
+          <button
+            type="button"
+            class="miniChevronBtn${collapsed ? "" : " active"}"
+            data-wled-toggle-controller="${controller.id}"
+            aria-expanded="${collapsed ? "false" : "true"}"
+            aria-label="${lang === "en" ? "Toggle details" : "Details ein-/ausklappen"}"
+            title="${lang === "en" ? "Details" : "Details"}"
+          ><span class="ddArrow">${dd}</span></button>
+        </div>
+        <div class="connectionStatusGrid compactSingle" style="margin-top:8px;" data-connections-open="true">
+          <button
+            type="button"
+            class="connectionStatusBtn disconnected"
+            data-wled-controller-connection="${controller.id}"
+          >
+            <div class="connectionStatusLabel">
+              <span>WLED</span>
+              <span class="connectionStatusText" data-wled-connection-line></span>
+            </div>
+          </button>
+        </div>
+        <div class="inlinePopupWrap${collapsed ? "" : " open"}" data-wled-controller-panel="${controller.id}" style="padding:0;border-top:none;background:transparent;">
+          <div class="formRow" style="margin-top:12px;">
+            <div class="connectionInputHeader">
+              <label class="label" for="wledControllerName_${controller.id}">${nameLbl}</label>
+            </div>
+            <input class="input" id="wledControllerName_${controller.id}" data-wled-controller-name="${controller.id}" type="text" placeholder="${escapeWledAttr(namePh)}" value="${escapeWledAttr(controller.name)}" />
           </div>
-          <div class="liSub" style="margin-top:0;flex:0 0 auto;">${isControllerCollapsed(controller.id) ? "v" : "^"}</div>
-        </button>
-        <div class="inlinePopupWrap${isControllerCollapsed(controller.id) ? "" : " open"}" data-wled-controller-panel="${controller.id}">
-          <div class="inlinePopupCard">
-            <div class="formRow" style="margin-top:0;">
-              <label class="label" for="wledControllerName_${controller.id}">Name</label>
-              <input class="input" id="wledControllerName_${controller.id}" data-wled-controller-name="${controller.id}" type="text" placeholder="${getLang(settings) === "en" ? "Optional display name" : "Optionaler Anzeigename"}" value="${controller.name}" />
+          <div class="formRow">
+            <div class="connectionInputHeader">
+              <label class="label" for="wledControllerEndpoint_${controller.id}">${endpointLbl}</label>
             </div>
-            <div class="formRow">
-              <label class="label" for="wledControllerEndpoint_${controller.id}">IP / Endpoint</label>
-              <input class="input" id="wledControllerEndpoint_${controller.id}" data-wled-controller-endpoint="${controller.id}" type="text" placeholder="http://192.168.178.50" value="${controller.endpoint}" />
-              <div class="hint">WLED IP oder kompletter HTTP Endpoint.</div>
-            </div>
-            <div class="inlineActionsRow" style="margin-top:12px;">
-              <button type="button" class="btnMini" data-wled-load-presets="${controller.id}">Presets laden</button>
-              ${index > 0 ? `<button type="button" class="customThemeDelete" data-wled-remove-controller="${controller.id}" title="Controller entfernen">X</button>` : ""}
-            </div>
-            <div class="hint" data-wled-status="${controller.id}">${wledUiState.statusByControllerId[controller.id] || ""}</div>
+            <input class="input" id="wledControllerEndpoint_${controller.id}" data-wled-controller-endpoint="${controller.id}" type="text" placeholder="${endpointPh}" value="${escapeWledAttr(controller.endpoint)}" />
+            <div class="hint">${hintEndpoint}</div>
           </div>
+          <div class="inlineActionsRow" style="margin-top:12px;">
+            <button type="button" class="btnMini" data-wled-load-presets="${controller.id}">${lang === "en" ? "Load presets" : "Presets laden"}</button>
+            ${index > 0 ? `<button type="button" class="customThemeDelete" data-wled-remove-controller="${controller.id}" title="${lang === "en" ? "Remove controller" : "Controller entfernen"}">X</button>` : ""}
+          </div>
+          <div class="hint" style="margin-top:8px;" data-wled-status="${controller.id}">${wledUiState.statusByControllerId[controller.id] || ""}</div>
         </div>
       </div>
-    `).join("");
+    `;
+    }).join("");
   }
 
   function renderTargetSummary(item, settings) {
@@ -572,7 +1018,7 @@
           <div class="listToggle">
             <div class="liText">
               <div class="liTitle">${item.name}</div>
-              <div class="liSub">${getTriggerLabel(item.trigger, settings)} | ${renderTargetSummary(item, settings)}</div>
+              <div class="liSub">${getEffectTriggerSummary(item, settings)} | ${renderTargetSummary(item, settings)}</div>
             </div>
             <div class="inlineActionsRow">
               <button type="button" class="btnMini" data-wled-test="${item.id}">Test</button>
@@ -589,8 +1035,10 @@
   }
 
   function updateControllerStatus(root, controllerId, text) {
-    const el = root.querySelector(`[data-wled-status="${controllerId}"]`);
-    if (el) el.textContent = text || "";
+    void root;
+    document.querySelectorAll(`[data-wled-status="${controllerId}"]`).forEach((el) => {
+      el.textContent = text || "";
+    });
   }
 
   function refreshPresetPicker(root, settings) {
@@ -612,12 +1060,13 @@
   async function loadPresetsForController(api, controllerId) {
     const root = api.root;
     const settings = api.getSettings?.() || {};
-    const endpoint = String(root.querySelector(`[data-wled-controller-endpoint="${controllerId}"]`)?.value || "").trim();
+    const endpoint = String(document.querySelector(`[data-wled-controller-endpoint="${controllerId}"]`)?.value || "").trim();
     if (!endpoint) {
       wledUiState.presetsByControllerId[controllerId] = [];
       wledUiState.loadedEndpointByControllerId[controllerId] = "";
       wledUiState.statusByControllerId[controllerId] = "";
       updateControllerStatus(root, controllerId, "");
+      afterWledPresetLoadUi(api, settings);
       return;
     }
     if (wledUiState.loadingByControllerId[controllerId]) return;
@@ -634,26 +1083,164 @@
       wledUiState.statusByControllerId[controllerId] = text;
       updateControllerStatus(root, controllerId, text);
       refreshPresetPicker(root, api.getSettings?.() || settings);
+      afterWledPresetLoadUi(api, api.getSettings?.() || settings);
     } catch (e) {
       const text = getLang(settings) === "en"
         ? `Load failed: ${String(e?.message || e)}`
         : `Laden fehlgeschlagen: ${String(e?.message || e)}`;
+      wledUiState.presetsByControllerId[controllerId] = [];
+      wledUiState.loadedEndpointByControllerId[controllerId] = "";
       wledUiState.statusByControllerId[controllerId] = text;
       updateControllerStatus(root, controllerId, text);
+      refreshPresetPicker(root, api.getSettings?.() || settings);
+      afterWledPresetLoadUi(api, api.getSettings?.() || settings);
     } finally {
       wledUiState.loadingByControllerId[controllerId] = false;
     }
   }
 
-  function autoLoadPresets(api, settings) {
-    const controllers = getControllers(settings);
+  function paintWledControllerConnectionButtonsFromCache(api, settings) {
+    const s = settings || {};
+    const controllers = getControllers(s);
+    const lang = getLang(s);
     for (const controller of controllers) {
-      const endpoint = String(controller.endpoint || "").trim();
-      if (!endpoint) continue;
-      if (wledUiState.loadingByControllerId[controller.id]) continue;
-      if (wledUiState.loadedEndpointByControllerId[controller.id] === endpoint) continue;
-      loadPresetsForController(api, controller.id);
+      const id = controller.id;
+      const ep = String(controller.endpoint || "").trim();
+      if (!ep) {
+        api.updateWledControllerConnectionBtnUi?.(id, false, lang === "en" ? "No endpoint" : "Kein Endpoint");
+        continue;
+      }
+      const loaded = wledUiState.loadedEndpointByControllerId[id] === ep;
+      const st = String(wledUiState.statusByControllerId[id] || "");
+      if (!loaded) {
+        api.updateWledControllerConnectionBtnUi?.(id, false, lang === "en" ? "Tap load" : "Presets laden");
+        continue;
+      }
+      if (/fehl|failed/i.test(st)) {
+        api.updateWledControllerConnectionBtnUi?.(id, false, lang === "en" ? "Offline" : "Offline");
+        continue;
+      }
+      const cnt = (wledUiState.presetsByControllerId[id] || []).length;
+      api.updateWledControllerConnectionBtnUi?.(id, true, lang === "en" ? `${cnt} presets` : `${cnt} Presets`);
     }
+  }
+
+  function refreshWledModuleStripFromCache(api, settings) {
+    const s = settings || {};
+    const lang = getLang(s);
+    const withEp = getControllers(s).filter((c) => String(c.endpoint || "").trim());
+    if (!withEp.length) {
+      api.updateWledConnectionStripUi?.("disconnected", lang === "en" ? "No endpoint" : "Kein Endpoint");
+      return;
+    }
+    const anyLoaded = withEp.some((c) => {
+      const ep = String(c.endpoint).trim();
+      return wledUiState.loadedEndpointByControllerId[c.id] === ep;
+    });
+    if (!anyLoaded) {
+      api.updateWledConnectionStripUi?.(
+        "disconnected",
+        lang === "en" ? "Tap refresh (Presets)" : "Aktualisieren (Presets)"
+      );
+      return;
+    }
+    let okN = 0;
+    let bad = 0;
+    for (const c of withEp) {
+      const ep = String(c.endpoint).trim();
+      if (wledUiState.loadedEndpointByControllerId[c.id] !== ep) continue;
+      const st = String(wledUiState.statusByControllerId[c.id] || "");
+      if (/fehl|failed/i.test(st)) bad += 1;
+      else okN += 1;
+    }
+    let state = "connecting";
+    let detail = "";
+    if (bad && !okN) {
+      state = "disconnected";
+      detail = lang === "en" ? "Unreachable" : "Nicht erreichbar";
+    } else if (okN && !bad) {
+      state = "connected";
+      detail = lang === "en" ? "OK" : "OK";
+    } else {
+      state = "connecting";
+      detail = lang === "en" ? `${okN}/${withEp.length} OK` : `${okN}/${withEp.length} OK`;
+    }
+    api.updateWledConnectionStripUi?.(state, detail);
+  }
+
+  function afterWledPresetLoadUi(api, settings) {
+    const s = settings || api.getSettings?.() || {};
+    paintWledControllerConnectionButtonsFromCache(api, s);
+    refreshWledModuleStripFromCache(api, s);
+  }
+
+  /**
+   * Controller-UI liegt in den Einstellungen (#settingsWledControllersMount), nicht im WLED-Modul-root —
+   * daher Document-Delegation, sonst erreichen Klicks/Change den root-Listener nicht.
+   */
+  function wireSettingsWledControllerDelegation(scopeRef) {
+    if (scopeRef.__admWledSettingsMountDocWired) return;
+    scopeRef.__admWledSettingsMountDocWired = true;
+
+    document.addEventListener("change", async (ev) => {
+      const target = ev.target;
+      if (!target?.closest?.("#settingsWledControllersMount")) return;
+      if (!target.matches?.("[data-wled-controller-name], [data-wled-controller-endpoint]")) return;
+      const api = scopeRef.AD_SB_MODULES?.wled?._delegateApi;
+      if (!api) return;
+      const settings = api.getSettings?.() || {};
+      const controllers = getControllers(settings).map((item) => {
+        if (item.id !== target.dataset.wledControllerName && item.id !== target.dataset.wledControllerEndpoint) return item;
+        return {
+          ...item,
+          name: String(document.querySelector(`[data-wled-controller-name="${item.id}"]`)?.value || "").trim(),
+          endpoint: String(document.querySelector(`[data-wled-controller-endpoint="${item.id}"]`)?.value || "").trim()
+        };
+      });
+      await saveControllers(api, controllers);
+    });
+
+    document.addEventListener("click", async (ev) => {
+      if (!ev.target?.closest?.("#settingsWledControllersMount")) return;
+      const api = scopeRef.AD_SB_MODULES?.wled?._delegateApi;
+      if (!api) return;
+
+      const loadBtn = ev.target.closest?.("[data-wled-load-presets]");
+      if (loadBtn) {
+        await loadPresetsForController(api, String(loadBtn.dataset.wledLoadPresets || ""));
+        return;
+      }
+
+      const collapseBtn = ev.target.closest?.("[data-wled-toggle-controller]");
+      if (collapseBtn) {
+        const controllerId = String(collapseBtn.dataset.wledToggleController || "");
+        wledUiState.collapsedByControllerId[controllerId] = !isControllerCollapsed(controllerId);
+        const settings = api.getSettings?.() || {};
+        const controllerMount = document.querySelector("#settingsWledControllersMount");
+        if (controllerMount) controllerMount.innerHTML = renderControllers(settings);
+        return;
+      }
+
+      const removeBtn = ev.target.closest?.("[data-wled-remove-controller]");
+      if (removeBtn) {
+        const settings = api.getSettings?.() || {};
+        const controllers = getControllers(settings);
+        const removeId = String(removeBtn.dataset.wledRemoveController || "");
+        const nextControllers = controllers.filter((item) => item.id !== removeId);
+        const nextEffects = parseWledEffects(settings.wledEffectsJson, controllers)
+          .map((item) => ({
+            ...item,
+            presetTargets: item.presetTargets.filter((target) => target.controllerId !== removeId)
+          }))
+          .filter((item) => item.presetTargets.length > 0);
+        delete wledUiState.presetsByControllerId[removeId];
+        delete wledUiState.statusByControllerId[removeId];
+        await api.savePartial({
+          wledControllersJson: JSON.stringify(nextControllers),
+          wledEffectsJson: JSON.stringify(nextEffects)
+        });
+      }
+    });
   }
 
   scope.AD_SB_MODULES.wled = {
@@ -664,6 +1251,18 @@
     render() {
       return `
         <h2 class="title" data-i18n="title_wled">WLED</h2>
+        <div class="card" data-settings-nav-connections style="cursor:pointer;">
+          <div class="sectionHead">
+            <div class="sectionTitle" style="margin:0;" data-i18n="section_connections">Verbindungen</div>
+          </div>
+          <div class="connectionStatusBtn" data-wled-connection-strip style="width:100%;box-sizing:border-box;">
+            <div class="connectionStatusLabel">
+              <span>WLED</span>
+              <span class="connectionStatusText" data-wled-strip-text></span>
+            </div>
+          </div>
+          <div class="hint" style="margin-top:8px;" data-i18n="module_connections_tap_hint">Tippen, um die Verbindungen in den Einstellungen zu oeffnen.</div>
+        </div>
         <div class="card">
           <div class="sectionHead">
             <div class="sectionTitle" style="margin:0;">WLED Effekte</div>
@@ -675,36 +1274,95 @@
             <input class="input" id="wledEffectName" type="text" placeholder="z. B. 180 Ring" />
           </div>
           <div class="formRow">
-            <label class="label">Presets</label>
+            <label class="label" for="wledEffectTrigger">Trigger</label>
+            <select class="input" id="wledEffectTrigger">
+              <option value="">${getLang({ uiLanguage: "de" }) === "en" ? "Choose trigger" : "Trigger auswaehlen"}</option>
+              ${renderTriggerDropdownOptions({ uiLanguage: "de" })}
+            </select>
+            <div class="hint">Waehle den Trigger aus, der den Effekt ausloesen soll.</div>
+          </div>
+          <div class="formRow hidden" id="wledSegmentPadRow" hidden>
+            <label class="label" for="wledSegmentField">Feld / Treffer</label>
+            <div class="wledSegmentFieldRow" style="display:flex;gap:8px;align-items:stretch;">
+              <input class="input" id="wledSegmentField" type="text" autocomplete="off" placeholder="t20" style="flex:1;min-width:0;" />
+              <button
+                type="button"
+                class="btnMini wledPadToggleBtn"
+                id="wledSegmentPadToggle"
+                aria-expanded="false"
+                aria-controls="wledSegmentPadBody"
+                aria-label="Tastenfeld oeffnen"
+                title="Tastenfeld oeffnen"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <circle cx="6" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="18" cy="5" r="2"/>
+                  <circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/>
+                  <circle cx="6" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="18" cy="19" r="2"/>
+                </svg>
+              </button>
+            </div>
+            <div class="hint" id="wledSegmentPadHint"></div>
+            <div id="wledSegmentPadBody" class="hidden" hidden style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(15,23,42,0.55);border:1px solid rgba(148,163,184,0.35);">
+              <div class="wledPadMultStrip" id="wledPadMultRow">
+                <button type="button" class="choiceBtn wledPadMultChip" data-wled-pad-mult="s" title="Single">S</button>
+                <button type="button" class="choiceBtn wledPadMultChip" data-wled-pad-mult="d" title="Double">D</button>
+                <button type="button" class="choiceBtn wledPadMultChip" data-wled-pad-mult="t" title="Triple">T</button>
+              </div>
+              <div class="wledPadNumGrid" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-top:10px;">
+                ${renderWledPadNumberGrid()}
+              </div>
+              <div class="wledPadSpecialRow" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
+                <button type="button" class="btnMini" data-wled-pad-twentyfive="1" title="Bull (25): S=s25, D=bull (Doppel-25), T=t25">Bull (25)</button>
+                <button type="button" class="btnMini" data-wled-pad-special="miss" title="Miss / kein Treffer (Worker: outside)">Miss</button>
+                <button type="button" class="btnMini" data-wled-pad-special="outside">Outside</button>
+                <button type="button" class="btnMini" data-wled-pad-special="dbull" title="Double Bull (Innenbull)">DBull</button>
+              </div>
+            </div>
+          </div>
+          <div class="formRow hidden" id="wledPlayerFilterRow" hidden>
+            <label class="label" for="wledPlayerFilterInput">Spielername (Filter)</label>
+            <input class="input" id="wledPlayerFilterInput" type="text" placeholder="z. B. alex" autocomplete="off" />
+            <div class="hint" id="wledPlayerFilterHint"></div>
+          </div>
+          <div class="formRow hidden" id="wledAlternateLogicRow" hidden>
+            <div class="hint" id="wledAlternateLogicHint"></div>
+          </div>
+          <div class="formRow hidden" id="wledChainTripleRow" hidden>
+            <label class="label" for="wledChainTripleInput">Trefferkette</label>
+            <input class="input" id="wledChainTripleInput" type="text" autocomplete="off" placeholder="z.B. 1 20 5" />
+            <div class="hint" id="wledChainTripleHint"></div>
+          </div>
+          <div class="formRow">
+            <div class="connectionInputHeader" style="align-items:center;">
+              <label class="label" style="margin:0;">Presets</label>
+              <button type="button" class="btnMini" id="btnWledRefreshPresetsModule" data-i18n="wled_presets_refresh_btn">Aktualisieren</button>
+            </div>
             <div id="wledPresetPickerMount"></div>
           </div>
           <div class="formRow" id="wledAdvancedJsonSectionMount">${renderAdvancedJsonSection({ uiLanguage: "de" })}</div>
-          <div class="formRow">
-            <label class="label" for="wledEffectTrigger">Autodarts Trigger</label>
-            <input class="input" id="wledEffectTrigger" type="text" list="wledTriggerSuggestions" placeholder="z. B. gameshot, range_100_180, t20_t20_t20" />
-            <datalist id="wledTriggerSuggestions">${renderTriggerSuggestions({ uiLanguage: "de" })}</datalist>
-            <div class="hint">Freier Trigger oder Schnellwahl. Fuer weitere Spieler einfach <code>player_3</code>, <code>player_4</code>, <code>player_5</code> usw. eintragen.</div>
-            <div class="hint" id="wledEffectTriggerDynamicHint" style="display:none;"></div>
-            <div id="wledTriggerPickerMount">${renderTriggerPickerGroups({ uiLanguage: "de" })}</div>
-          </div>
           <div id="wledEffectsStatus" class="hint" style="margin-top:8px;"></div>
           <div id="wledEffectsListMount"></div>
         </div>
 
         <div class="spacer"></div>
-        <div class="sectionHead">
-          <div class="sectionTitle" style="margin:0;">Controller</div>
-          <button id="addWledControllerBtn" class="btnMini" type="button">Controller hinzufuegen</button>
-        </div>
-        <div id="wledControllersMount"></div>
-        <div class="spacer"></div>
       `;
     },
     bind(api) {
       const root = api.root;
-      root.querySelector("#wledEffectTrigger")?.addEventListener("input", () => {
-        updateTriggerFieldHint(root, api.getSettings?.() || {});
+      scope.AD_SB_MODULES.wled._delegateApi = api;
+      wireSettingsWledControllerDelegation(scope);
+      onWledTriggerSelectChange(root, api.getSettings?.() || {});
+      syncWledPadMultUi(root);
+
+      root.querySelector("#btnWledRefreshPresetsModule")?.addEventListener("click", async () => {
+        const settings = api.getSettings?.() || {};
+        const controllers = getControllers(settings);
+        for (const c of controllers) {
+          await loadPresetsForController(api, c.id);
+        }
+        afterWledPresetLoadUi(api, api.getSettings?.() || settings);
       });
+
       root.addEventListener("input", (ev) => {
         const target = ev.target;
         if (target?.matches?.("#wledAdvancedJson")) {
@@ -719,29 +1377,31 @@
         if (preview) preview.style.background = `hsl(${hue} 88% 50%)`;
       });
 
-      root.querySelector("#addWledControllerBtn")?.addEventListener("click", async () => {
-        const settings = api.getSettings?.() || {};
-        const controllers = getControllers(settings);
-        const nextIndex = controllers.length + 1;
-        const nextId = `ctrl_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
-        const nextControllers = controllers.concat([{ id: nextId, name: "", endpoint: "" }]);
-        wledUiState.collapsedByControllerId[nextId] = false;
-        await saveControllers(api, nextControllers);
-        const statusEl = root.querySelector("#wledEffectsStatus");
-        if (statusEl) statusEl.textContent = getLang(settings) === "en"
-          ? `Controller ${nextIndex} added.`
-          : `Controller ${nextIndex} hinzugefuegt.`;
-      });
-
       root.querySelector("#addWledEffectBtn")?.addEventListener("click", async () => {
         const settings = api.getSettings?.() || {};
         const controllers = getControllers(settings);
         const lang = getLang(settings);
         const statusEl = root.querySelector("#wledEffectsStatus");
         const name = String(root.querySelector("#wledEffectName")?.value || "").trim();
-        const trigger = normalizeConfiguredTrigger(root.querySelector("#wledEffectTrigger")?.value);
+        const composed = composeWledEffectFromForm(root);
         const advancedJson = String(root.querySelector("#wledAdvancedJson")?.value || wledUiState.advancedJsonDraft || "").trim();
         const presetTargets = getSelectedPresetTargets(root, settings);
+        if (!composed.ok) {
+          const msg = {
+            no_trigger: lang === "en" ? "Please choose a trigger." : "Bitte einen Trigger auswaehlen.",
+            player_empty: lang === "en"
+              ? "Enter part of the player name (name filter is required)."
+              : "Bitte einen Teil des Spielernamens eintragen (Namensfilter ist Pflicht).",
+            segment_empty: lang === "en" ? "Enter or pick a segment (e.g. t20)." : "Segment eintragen oder ueber die Feld-Tasten waehlen (z.B. t20).",
+            segment_bad: lang === "en" ? "Invalid segment. Examples: t20, d16, s5, bull, outside." : "Ungueltiges Segment. Beispiele: t20, d16, s5, bull, outside.",
+            chain_bad: lang === "en"
+              ? "Hit chain: enter exactly three hits (e.g. three numbers 1 20 5 as singles, or three segment tokens)."
+              : "Trefferkette: genau drei Treffer eintragen (z.B. drei Zahlen 1 20 5 als Singles oder drei Segment-Tokens)."
+          };
+          if (statusEl) statusEl.textContent = msg[composed.code] || (lang === "en" ? "Check trigger and fields." : "Trigger und Felder pruefen.");
+          return;
+        }
+        const { trigger, playerFilter, chainTriple } = composed;
         if (!name || !trigger || (!presetTargets.length && !advancedJson)) {
           if (statusEl) statusEl.textContent = lang === "en"
             ? "Please enter a name, trigger and choose presets or Advanced Json."
@@ -764,18 +1424,37 @@
             : "Bitte mindestens ein Preset waehlen, damit der Ziel-Controller bekannt ist.";
           return;
         }
-        const nextEffects = parseWledEffects(settings.wledEffectsJson, controllers).concat([{
+        const trigNorm = normalizeConfiguredTrigger(trigger);
+        if (trigNorm === "player_turn_alternate" && presetTargets.length !== 2) {
+          if (statusEl) statusEl.textContent = lang === "en"
+            ? "Player (alternate): select exactly two presets (order = A then B)."
+            : "Spieler (Wechsel-Logik): genau zwei Presets waehlen (Reihenfolge = A dann B).";
+          return;
+        }
+        const newRow = {
           id: `wled_${Date.now()}_${Math.floor(Math.random() * 9999)}`,
           name,
           trigger,
           presetTargets,
-          advancedJson
-        }]);
+          advancedJson,
+          playerFilter: String(playerFilter || "").trim()
+        };
+        if (trigNorm === "chain_visit" && Array.isArray(chainTriple) && chainTriple.length === 3) {
+          newRow.chainTriple = chainTriple;
+        }
+        const nextEffects = parseWledEffects(settings.wledEffectsJson, controllers).concat([newRow]);
         await api.savePartial({ wledEffectsJson: JSON.stringify(nextEffects) });
         const nameInput = root.querySelector("#wledEffectName");
         if (nameInput) nameInput.value = "";
+        const pfi = root.querySelector("#wledPlayerFilterInput");
+        if (pfi) pfi.value = "";
+        const chainIn = root.querySelector("#wledChainTripleInput");
+        if (chainIn) chainIn.value = "";
+        setWledSegmentField(root, "");
         const triggerInput = root.querySelector("#wledEffectTrigger");
         if (triggerInput) triggerInput.value = "";
+        onWledTriggerSelectChange(root, api.getSettings?.() || settings);
+        syncWledPadMultUi(root);
         const advancedJsonInput = root.querySelector("#wledAdvancedJson");
         if (advancedJsonInput) advancedJsonInput.value = "";
         wledUiState.advancedJsonDraft = "";
@@ -783,6 +1462,14 @@
         wledUiState.presetDropdownOpen = false;
         refreshPresetPicker(root, api.getSettings?.() || settings);
         if (statusEl) statusEl.textContent = lang === "en" ? "WLED effect added." : "WLED Effekt hinzugefuegt.";
+      });
+
+      root.addEventListener("change", (ev) => {
+        const target = ev.target;
+        if (target?.matches?.("#wledEffectTrigger")) {
+          onWledTriggerSelectChange(root, api.getSettings?.() || {});
+          syncWledPadMultUi(root);
+        }
       });
 
       root.addEventListener("change", async (ev) => {
@@ -798,18 +1485,6 @@
           return;
         }
 
-        if (target?.matches?.("[data-wled-controller-name], [data-wled-controller-endpoint]")) {
-          const settings = api.getSettings?.() || {};
-          const controllers = getControllers(settings).map((item) => {
-            if (item.id !== target.dataset.wledControllerName && item.id !== target.dataset.wledControllerEndpoint) return item;
-            return {
-              ...item,
-              name: String(root.querySelector(`[data-wled-controller-name="${item.id}"]`)?.value || "").trim(),
-              endpoint: String(root.querySelector(`[data-wled-controller-endpoint="${item.id}"]`)?.value || "").trim()
-            };
-          });
-          await saveControllers(api, controllers);
-        }
       });
 
       root.addEventListener("click", async (ev) => {
@@ -820,6 +1495,48 @@
         ) {
           wledUiState.presetDropdownOpen = false;
           refreshPresetPicker(root, api.getSettings?.() || {});
+        }
+
+        if (wledUiState.wledSegmentPadOpen) {
+          const inSegPad = ev.target?.closest?.(
+            "#wledSegmentPadBody, #wledSegmentPadToggle, .wledSegmentFieldRow, #wledSegmentPadHint"
+          );
+          if (!inSegPad) {
+            setWledSegmentPadPopoverOpen(root, false, api.getSettings?.() || {});
+          }
+        }
+
+        const segPadTgl = ev.target?.closest?.("#wledSegmentPadToggle");
+        if (segPadTgl && WLED_PAD_SEGMENT_SELECTS.has(getWledSelectMode(root))) {
+          setWledSegmentPadPopoverOpen(root, !wledUiState.wledSegmentPadOpen, api.getSettings?.() || {});
+          return;
+        }
+
+        const multBtn = ev.target?.closest?.("[data-wled-pad-mult]");
+        const padMode = getWledSelectMode(root);
+        if (multBtn && (padMode === WLED_PAD_LEG || padMode === WLED_PAD_THROW)) {
+          wledUiState.wledPadMult = String(multBtn.dataset.wledPadMult || "t").toLowerCase();
+          syncWledPadMultUi(root);
+          return;
+        }
+
+        const numBtn = ev.target?.closest?.("[data-wled-pad-num]");
+        if (numBtn && WLED_PAD_SEGMENT_SELECTS.has(getWledSelectMode(root))) {
+          const n = parseInt(String(numBtn.dataset.wledPadNum || ""), 10);
+          if (Number.isFinite(n) && n >= 1 && n <= 20) applyPadNumber(root, n);
+          return;
+        }
+
+        const tfBtn = ev.target?.closest?.("[data-wled-pad-twentyfive]");
+        if (tfBtn && WLED_PAD_SEGMENT_SELECTS.has(getWledSelectMode(root))) {
+          applyPadNumber(root, 25);
+          return;
+        }
+
+        const specBtn = ev.target?.closest?.("[data-wled-pad-special]");
+        if (specBtn && WLED_PAD_SEGMENT_SELECTS.has(getWledSelectMode(root))) {
+          applyPadSpecial(root, String(specBtn.dataset.wledPadSpecial || ""));
+          return;
         }
 
         const dropdownBtn = ev.target?.closest?.("#wledPresetDropdownBtn");
@@ -838,17 +1555,6 @@
           return;
         }
 
-        const groupToggleBtn = ev.target?.closest?.("[data-wled-trigger-group-toggle]");
-        if (groupToggleBtn) {
-          const groupKey = String(groupToggleBtn.dataset.wledTriggerGroupToggle || "");
-          if (groupKey) {
-            TRIGGER_GROUP_COLLAPSED[groupKey] = !isTriggerGroupCollapsed(groupKey);
-            const triggerPickerMount = root.querySelector("#wledTriggerPickerMount");
-            if (triggerPickerMount) triggerPickerMount.innerHTML = renderTriggerPickerGroups(api.getSettings?.() || {});
-          }
-          return;
-        }
-
         const advancedModeBtn = ev.target?.closest?.("[data-wled-advanced-mode]");
         if (advancedModeBtn) {
           wledUiState.advancedJsonHelperMode = String(advancedModeBtn.dataset.wledAdvancedMode || "player") === "score" ? "score" : "player";
@@ -863,16 +1569,6 @@
           const nextValue = buildSolidAdvancedJson(wledUiState.advancedJsonHelperHue);
           wledUiState.advancedJsonDraft = nextValue;
           if (textarea) textarea.value = nextValue;
-          return;
-        }
-
-        const triggerPickBtn = ev.target?.closest?.("[data-wled-trigger-pick]");
-        if (triggerPickBtn) {
-          const triggerInput = root.querySelector("#wledEffectTrigger");
-          if (triggerInput) {
-            triggerInput.value = String(triggerPickBtn.dataset.wledTriggerPick || "");
-            triggerInput.dispatchEvent(new Event("input", { bubbles: true }));
-          }
           return;
         }
 
@@ -910,43 +1606,6 @@
           return;
         }
 
-        const loadBtn = ev.target?.closest?.("[data-wled-load-presets]");
-        if (loadBtn) {
-          await loadPresetsForController(api, String(loadBtn.dataset.wledLoadPresets || ""));
-          return;
-        }
-
-        const collapseBtn = ev.target?.closest?.("[data-wled-toggle-controller]");
-        if (collapseBtn) {
-          const controllerId = String(collapseBtn.dataset.wledToggleController || "");
-          wledUiState.collapsedByControllerId[controllerId] = !isControllerCollapsed(controllerId);
-          const settings = api.getSettings?.() || {};
-          const controllerMount = root.querySelector("#wledControllersMount");
-          if (controllerMount) controllerMount.innerHTML = renderControllers(settings);
-          return;
-        }
-
-        const removeBtn = ev.target?.closest?.("[data-wled-remove-controller]");
-        if (removeBtn) {
-          const settings = api.getSettings?.() || {};
-          const controllers = getControllers(settings);
-          const removeId = String(removeBtn.dataset.wledRemoveController || "");
-          const nextControllers = controllers.filter((item) => item.id !== removeId);
-          const nextEffects = parseWledEffects(settings.wledEffectsJson, controllers)
-            .map((item) => ({
-              ...item,
-              presetTargets: item.presetTargets.filter((target) => target.controllerId !== removeId)
-            }))
-            .filter((item) => item.presetTargets.length > 0);
-          delete wledUiState.presetsByControllerId[removeId];
-          delete wledUiState.statusByControllerId[removeId];
-          await api.savePartial({
-            wledControllersJson: JSON.stringify(nextControllers),
-            wledEffectsJson: JSON.stringify(nextEffects)
-          });
-          return;
-        }
-
         const deleteBtn = ev.target?.closest?.("[data-wled-delete]");
         if (deleteBtn) {
           const settings = api.getSettings?.() || {};
@@ -967,9 +1626,29 @@
         const match = items.find((item) => item.id === id);
         if (!match) return;
         try {
-          const res = await api.send({ type: "TRIGGER_WLED_TARGETS", targets: match.presetTargets, advancedJson: match.advancedJson || "" });
+          const isAlt = normalizeConfiguredTrigger(match.trigger) === "player_turn_alternate";
+          const testTargets = isAlt && Array.isArray(match.presetTargets) && match.presetTargets.length >= 1
+            ? [match.presetTargets[0]]
+            : match.presetTargets;
+          const presetSummary = formatWledPresetLineForLog(testTargets);
+          const res = await api.send({
+            type: "TRIGGER_WLED_TARGETS",
+            targets: testTargets,
+            advancedJson: match.advancedJson || "",
+            wledLogMeta: {
+              effectName: match.name,
+              triggerUnit: `${getEffectTriggerSummary(match, settings)} · Test`,
+              presetSummary: presetSummary || "—"
+            }
+          });
           if (!res?.ok) throw new Error(res?.error || "Trigger failed");
-          if (statusEl) statusEl.textContent = getLang(settings) === "en" ? "Presets triggered." : "Presets ausgeloest.";
+          if (statusEl) {
+            statusEl.textContent = isAlt && getLang(settings) === "en"
+              ? "Test: fired preset 1 only (alternate uses both in play)."
+              : isAlt
+                ? "Test: nur Preset 1 ausgeloest (im Spiel wechseln beide)."
+                : (getLang(settings) === "en" ? "Presets triggered." : "Presets ausgeloest.");
+          }
         } catch (e) {
           if (statusEl) statusEl.textContent = getLang(settings) === "en"
             ? `Trigger failed: ${String(e?.message || e)}`
@@ -983,17 +1662,23 @@
       const controllers = getControllers(s);
       wledUiState.advancedJsonDraft = String(root.querySelector("#wledAdvancedJson")?.value || wledUiState.advancedJsonDraft || "");
 
-      const triggerSuggestions = root.querySelector("#wledTriggerSuggestions");
-      if (triggerSuggestions) triggerSuggestions.innerHTML = renderTriggerSuggestions(s);
-      updateTriggerFieldHint(root, s);
+      const triggerSelect = root.querySelector("#wledEffectTrigger");
+      if (triggerSelect) {
+        const selectedTrigger = String(triggerSelect.value || "");
+        triggerSelect.innerHTML = `
+          <option value="">${getLang(s) === "en" ? "Choose trigger" : "Trigger auswaehlen"}</option>
+          ${renderTriggerDropdownOptions(s)}
+        `;
+        if (selectedTrigger) triggerSelect.value = selectedTrigger;
+      }
+      onWledTriggerSelectChange(root, s);
+      syncWledPadMultUi(root);
       const advancedJsonSectionMount = root.querySelector("#wledAdvancedJsonSectionMount");
       if (advancedJsonSectionMount) advancedJsonSectionMount.innerHTML = renderAdvancedJsonSection(s);
       const advancedJsonHelperMount = root.querySelector("#wledAdvancedJsonHelperMount");
       if (advancedJsonHelperMount) advancedJsonHelperMount.innerHTML = renderAdvancedJsonHelper(s);
-      const triggerPickerMount = root.querySelector("#wledTriggerPickerMount");
-      if (triggerPickerMount) triggerPickerMount.innerHTML = renderTriggerPickerGroups(s);
 
-      const controllerMount = root.querySelector("#wledControllersMount");
+      const controllerMount = document.querySelector("#settingsWledControllersMount");
       if (controllerMount) controllerMount.innerHTML = renderControllers(s);
 
       refreshPresetPicker(root, s);
@@ -1005,7 +1690,31 @@
         updateControllerStatus(root, controller.id, wledUiState.statusByControllerId[controller.id] || "");
       }
 
-      autoLoadPresets(api, s);
+      paintWledControllerConnectionButtonsFromCache(api, s);
+      refreshWledModuleStripFromCache(api, s);
+    },
+    async appendControllerFromSettings(api) {
+      const settings = api.getSettings?.() || {};
+      const controllers = getControllers(settings);
+      const nextIndex = controllers.length + 1;
+      const nextId = `ctrl_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
+      const nextControllers = controllers.concat([{ id: nextId, name: "", endpoint: "" }]);
+      wledUiState.collapsedByControllerId[nextId] = false;
+      await saveControllers(api, nextControllers);
+      const statusEl = document.querySelector("#wledEffectsStatus");
+      if (statusEl) {
+        statusEl.textContent = getLang(settings) === "en"
+          ? `Controller ${nextIndex} added.`
+          : `Controller ${nextIndex} hinzugefuegt.`;
+      }
+    },
+    async refreshPresetsOnPopupOpen(api) {
+      const settings = api.getSettings?.() || {};
+      const controllers = getControllers(settings);
+      for (const c of controllers) {
+        await loadPresetsForController(api, c.id);
+      }
+      afterWledPresetLoadUi(api, api.getSettings?.() || settings);
     }
   };
 })(window);

@@ -1,4 +1,4 @@
-(function initWebsiteDesignVerticalThemes(scope) {
+(function initThemesVerticalConfig(scope) {
   const sets = scope.AD_SB_WEBSITE_THEME_SETS || (scope.AD_SB_WEBSITE_THEME_SETS = {});
   sets.vertical = [
     {

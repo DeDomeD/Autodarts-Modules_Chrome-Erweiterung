@@ -51,7 +51,8 @@
     for (const key of Object.keys(scope.AD_SB_MODULE_CONFIGS || {})) allow.add(String(key || "").toLowerCase());
     const out = [];
     for (const entry of raw) {
-      const id = String(entry || "").trim().toLowerCase();
+      let id = String(entry || "").trim().toLowerCase();
+      if (id === "websitedesign") id = "themes";
       if (!id) continue;
       if (!allow.has(id)) continue;
       if (out.includes(id)) continue;
@@ -62,11 +63,13 @@
       out.includes("overlay");
     const hasAnyNewModule =
       out.includes("wled") ||
+      out.includes("pixelit") ||
       out.includes("caller") ||
+      out.includes("playercam") ||
       out.includes("obszoom") ||
-      out.includes("websitedesign");
+      out.includes("themes");
     if (hadLegacyBase && !hasAnyNewModule) {
-      out.push("wled", "caller", "obszoom", "websitedesign");
+      out.push("wled", "caller", "obszoom", "themes");
     }
     return out;
   }
@@ -89,8 +92,11 @@
       callerEnabled: "caller",
       obsZoomEnabled: "obszoom",
       macrosEnabled: "macros",
-      websiteDesignEnabled: "websitedesign",
-      ligaEnabled: "liga"
+      themesEnabled: "themes",
+      lobbyFilterEnabled: "lobbyfilter",
+      ligaEnabled: "liga",
+      playercamEnabled: "playercam",
+      pixelitEnabled: "pixelit"
     };
     for (const [flagKey, moduleId] of Object.entries(moduleFlagMap)) {
       merged[flagKey] = installedSet.has(moduleId);
@@ -154,12 +160,37 @@
     if (!Object.prototype.hasOwnProperty.call(merged, "wledEffectsJson")) {
       merged.wledEffectsJson = "[]";
     }
+
+    delete merged.triggerPipeline;
     delete merged.wledEndpoint;
     delete merged.wledPrimaryEndpoint;
     delete merged.wledHitEffect;
     delete merged.wledMissEffect;
     delete merged.wledSecondaryEnabled;
     delete merged.wledSecondaryEndpoint;
+    delete merged.debugAllLogs;
+    delete merged.debugActions;
+    delete merged.debugObs;
+    delete merged.debugGameEvents;
+    delete merged.workerLogShowCheckout;
+    delete merged.workerLogShowPlayerTurn;
+    delete merged.workerLogShowEndTurn;
+    delete merged.workerLogShowTakeout;
+
+    const mirrorTierKeys = ["AD", "SB", "OBS", "WLED", "MISC"];
+    const defaultMirrorTiers = { AD: 0, SB: 0, OBS: 0, WLED: 0, MISC: 0 };
+    const mirrorTiers = { ...defaultMirrorTiers };
+    const rawTiers = merged.workerMirrorCatTiers;
+    if (rawTiers && typeof rawTiers === "object" && !Array.isArray(rawTiers)) {
+      for (const k of mirrorTierKeys) {
+        const n = Number(rawTiers[k]);
+        if (n === 0 || n === 1 || n === 2) mirrorTiers[k] = n;
+      }
+    }
+    merged.workerMirrorCatTiers = mirrorTiers;
+
+    delete merged.websiteDesignEnabled;
+
     return merged;
   }
 

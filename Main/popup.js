@@ -9,7 +9,21 @@ let CONNECTION_STATUS_TIMER = null;
 const DEFAULT_WEBSITE_API_URL = "https://autodarts-modules-production.up.railway.app";
 const WEBSITE_URL = `${DEFAULT_WEBSITE_API_URL}/`;
 
-const MODULE_ORDER = ["effects", "overlay", "wled", "caller", "obszoom", "macros", "websitedesign", "community", "liga", "games"];
+const MODULE_ORDER = [
+  "effects",
+  "overlay",
+  "wled",
+  "pixelit",
+  "caller",
+  "playercam",
+  "obszoom",
+  "macros",
+  "lobbyfilter",
+  "themes",
+  "community",
+  "liga",
+  "games"
+];
 /** Optional: Modul-ID → i18n-Key fuer Tooltip; gruener Pip via .navItemReady (derzeit unbenutzt). */
 const MODULE_NAV_READY = {};
 const WEBSITE_ICON_COLOR = "assets/ICON.png";
@@ -100,49 +114,20 @@ function collectModuleIniSpec() {
   return spec;
 }
 
-function clearOverflowMarquee() {
-  const nodes = $$(".liTitle");
-  nodes.forEach((el) => {
-    if (el.dataset.plainText) el.textContent = el.dataset.plainText;
+/** Alte Marquee-DOM von .liTitle entfernen (falls aus früherer Version). */
+function clearLegacyMarqueeFromLiTitles() {
+  $$(".liTitle").forEach((el) => {
+    if (el.querySelector(":scope > .marqueeTrack") && el.dataset.plainText) {
+      el.textContent = el.dataset.plainText;
+    }
     el.classList.remove("marqueeOn");
     el.style.removeProperty("--marquee-duration");
-  });
-}
-
-/** Nur .liTitle: einzeilige Zeilen in ListToggle — Untertitel (.liSub) und Überschriften sollen umbrechen, nicht laufen. */
-function applyOverflowMarquee() {
-  const nodes = $$(".liTitle");
-  /* Mindestüberstand in px: verhindert Lauftext wegen Subpixel/Roundoff obwohl optisch alles passt. */
-  const OVERFLOW_PAD = 8;
-  nodes.forEach((el) => {
-    if (el.querySelector(":scope > .marqueeTrack")) el.textContent = el.dataset.plainText || "";
-    const plain = (el.textContent || "").trim();
-    el.dataset.plainText = plain;
-    el.classList.remove("marqueeOn");
-    el.style.removeProperty("--marquee-duration");
-
-    if (!plain || !el.offsetParent || el.scrollWidth <= el.clientWidth + OVERFLOW_PAD) return;
-
-    const track = document.createElement("span");
-    track.className = "marqueeTrack";
-    const a = document.createElement("span");
-    const b = document.createElement("span");
-    a.className = "marqueeItem";
-    b.className = "marqueeItem";
-    a.textContent = plain;
-    b.textContent = plain;
-    track.append(a, b);
-    el.textContent = "";
-    el.appendChild(track);
-
-    const seconds = Math.max(6, Math.min(16, plain.length * 0.22));
-    el.style.setProperty("--marquee-duration", `${seconds}s`);
-    el.classList.add("marqueeOn");
+    delete el.dataset.plainText;
   });
 }
 
 function applyI18n() {
-  clearOverflowMarquee();
+  clearLegacyMarqueeFromLiTitles();
 
   $$("[data-i18n]").forEach((el) => {
     const key = el.dataset.i18n;
@@ -164,9 +149,9 @@ function applyI18n() {
     if (!key) return;
     el.setAttribute("aria-label", t(key));
   });
-
-  requestAnimationFrame(() => requestAnimationFrame(applyOverflowMarquee));
 }
+
+window.__ADM_APPLY_I18N__ = applyI18n;
 
 function setPage(name) {
   const pageName = String(name || "settings");
@@ -183,9 +168,56 @@ function setPage(name) {
   applySearchFilter(SEARCH);
 }
 
+function openConnectionsInSettings() {
+  setPage("settings");
+  requestAnimationFrame(() => {
+    document.getElementById("settingsConnectionsSection")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  });
+}
+
+function applyWledConnectionStrip(el, state, detailText) {
+  if (!el) return;
+  const s = String(state || "unknown").toLowerCase();
+  el.classList.remove("connected", "disconnected", "connecting", "exhausted");
+  if (s === "connected") el.classList.add("connected");
+  else if (s === "connecting") el.classList.add("connecting");
+  else el.classList.add("disconnected");
+  const textEl = el.querySelector("[data-wled-strip-text]");
+  if (textEl) textEl.textContent = detailText || "";
+}
+
+function applyWledControllerConnectionBtn(btn, ok, detailText) {
+  if (!btn) return;
+  btn.classList.remove("connected", "disconnected", "connecting", "exhausted");
+  if (ok === true) btn.classList.add("connected");
+  else btn.classList.add("disconnected");
+  const line = btn.querySelector("[data-wled-connection-line]");
+  if (line) line.textContent = detailText || "";
+}
+
+function updateWledConnectionStripUi(state, detailText) {
+  $$("[data-wled-connection-strip]").forEach((el) => applyWledConnectionStrip(el, state, detailText));
+}
+
+function updateWledControllerConnectionBtnUi(controllerId, ok, detailText) {
+  const id = String(controllerId || "").trim();
+  if (!id) return;
+  document.querySelectorAll(`[data-wled-controller-connection="${id}"]`).forEach((btn) => {
+    applyWledControllerConnectionBtn(btn, ok, detailText);
+  });
+}
+
 function getLastPageOrDefault() {
   try {
-    const saved = String(localStorage.getItem(LAST_PAGE_STORAGE_KEY) || "").trim().toLowerCase();
+    let saved = String(localStorage.getItem(LAST_PAGE_STORAGE_KEY) || "").trim().toLowerCase();
+    if (saved === "websitedesign") {
+      saved = "themes";
+      try {
+        localStorage.setItem(LAST_PAGE_STORAGE_KEY, "themes");
+      } catch {
+        /* ignore */
+      }
+    }
     if (!saved) return "settings";
     const exists = !!document.querySelector(`.page[data-page="${saved}"]`);
     return exists ? saved : "settings";
@@ -389,13 +421,7 @@ function parseIniSettings(text) {
     partial.installedModules = normalizeInstalledModules(String(modules.installed).split(","));
   }
 
-  const boolKeys = [
-    "onlyMyThrows",
-    "debugAllLogs",
-    "debugActions",
-    "debugObs",
-    "debugGameEvents"
-  ];
+  const boolKeys = [];
   const moduleIniSpec = collectModuleIniSpec();
   for (const key of moduleIniSpec.togglesBool) {
     if (!boolKeys.includes(key)) boolKeys.push(key);
@@ -406,7 +432,6 @@ function parseIniSettings(text) {
     if (parsed !== null) partial[key] = parsed;
   }
 
-  if (toggles.myPlayerIndex !== undefined) partial.myPlayerIndex = parseIniNumber(toggles.myPlayerIndex, 0);
   for (const [key, fallback] of Object.entries(moduleIniSpec.togglesNumber)) {
     if (toggles[key] === undefined) continue;
     partial[key] = parseIniNumber(toggles[key], fallback);
@@ -450,17 +475,10 @@ function toIniText(s) {
     `actionPrefix=${(settings.actionPrefix || "AD-SB ").trim()}`,
     "",
     "[toggles]",
-    `onlyMyThrows=${asBool(settings.onlyMyThrows)}`,
-    `myPlayerIndex=${Number.isFinite(settings.myPlayerIndex) ? settings.myPlayerIndex : 0}`,
     `uiLanguage=${String(settings.uiLanguage || "de").toLowerCase() === "en" ? "en" : "de"}`,
     "",
     ...moduleToggleBoolLines,
     ...moduleToggleNumberLines,
-    "",
-    `debugAllLogs=${asBool(settings.debugAllLogs)}`,
-    `debugActions=${asBool(settings.debugActions)}`,
-    `debugObs=${asBool(settings.debugObs)}`,
-    `debugGameEvents=${asBool(settings.debugGameEvents)}`,
     "",
     "[modules_config]",
     ...moduleConfigLines,
@@ -553,6 +571,51 @@ function collectFeatureNeeds(modules) {
   return needs;
 }
 
+/** Streamer.bot-Nutzung wie im Worker (`shouldUseStreamerbot`). */
+function settingsImplyStreamerbot(settings) {
+  if (settings?.sbEnabled === false) return false;
+  const installed = getInstalledModuleSet(settings?.installedModules);
+  return installed.has("effects") || installed.has("overlay") || installed.has("obszoom");
+}
+
+/**
+ * Beim Oeffnen des Popups: WLED-Presets, OBS-Szenen/Quellen, optional SB-Action-Namen (Effects-Datalist) nachladen.
+ */
+async function runPopupOpenExternalListRefresh(settings, host) {
+  if (!host) return;
+  const installed = getInstalledModuleSet(settings?.installedModules);
+  if (installed.has("wled")) {
+    const page = host.querySelector('.page[data-page="wled"]');
+    if (page) {
+      try {
+        await window.AD_SB_MODULES?.wled?.refreshPresetsOnPopupOpen?.(apiFor(page));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (installed.has("obszoom")) {
+    const page = host.querySelector('.page[data-page="obszoom"]');
+    if (page) {
+      try {
+        await window.AD_SB_MODULES?.obszoom?.refreshObsListsOnPopupOpen?.(apiFor(page));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  if (installed.has("effects") && settingsImplyStreamerbot(settings)) {
+    const page = host.querySelector('.page[data-page="effects"]');
+    if (page) {
+      try {
+        await window.AD_SB_MODULES?.effects?.refreshSbActionsDatalist?.(apiFor(page));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 function setModuleToggleTitle(input, enabled) {
   if (!input) return;
   input.title = enabled ? "Modul deaktivieren" : "Modul aktivieren";
@@ -624,6 +687,8 @@ function apiFor(root) {
     buildIniFiles,
     refreshSbStatus: refreshConnectionStatuses,
     refreshConnectionStatuses,
+    updateWledConnectionStripUi,
+    updateWledControllerConnectionBtnUi,
     callWebsiteApi,
     normalizeWebsiteApiUrl,
     getWebsiteAccountUrl,
@@ -657,9 +722,10 @@ function navIconSvg(id, fallback = "*") {
     overlay: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 10h8M8 14h5"/></svg>`,
     wled: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3a6 6 0 0 0-3.8 10.6c.5.4.8 1 .8 1.6V16h6v-.8c0-.6.3-1.2.8-1.6A6 6 0 0 0 12 3Z"/><path d="M10 19h4M10.5 21h3"/></svg>`,
     caller: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="9" y="4" width="6" height="10" rx="3"/><path d="M6.5 11.5a5.5 5.5 0 1 0 11 0M12 17v3M9.5 20h5"/></svg>`,
+    playercam: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2.5" stroke="currentColor" stroke-width="1.75"/><circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="1.75"/><path d="M8 4h8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>`,
     obszoom: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4M11 8v6M8 11h6"/></svg>`,
     macros: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="4" x2="14" y2="4"/><line x1="10" y1="4" x2="3" y2="4"/><line x1="21" y1="12" x2="12" y2="12"/><line x1="8" y1="12" x2="3" y2="12"/><line x1="21" y1="20" x2="16" y2="20"/><line x1="12" y1="20" x2="3" y2="20"/><line x1="14" y1="2" x2="14" y2="6"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="16" y1="18" x2="16" y2="22"/></svg>`,
-    websitedesign: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 16 8-8 4 4-8 8H4v-4Z"/><path d="m14 6 2-2 4 4-2 2"/></svg>`,
+    themes: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 16 8-8 4 4-8 8H4v-4Z"/><path d="m14 6 2-2 4 4-2 2"/></svg>`,
     community: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="8" r="2.5"/><path d="M3.5 18a4.5 4.5 0 0 1 9 0"/><path d="M13 18a3.5 3.5 0 0 1 7 0"/></svg>`,
     liga: `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 5h10v4a5 5 0 0 1-10 0V5Z"/><path d="M9 19h6M12 14v5"/><path d="M5 5h2M17 5h2"/></svg>`,
     games: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21.58 16.09l-1.09-7.66A3.996 3.996 0 0 0 16.53 5H7.47C5.48 5 3.79 6.46 3.51 8.43l-1.09 7.66C2.2 17.63 3.39 19 4.94 19c.68 0 1.32-.27 1.8-.75L9 16h6l2.26 2.25c.48.48 1.13.75 1.8.75 1.56 0 2.75-1.37 2.52-2.91zM7 15v-2H5v2H3v-2H1v2h2v2h2v-2h2zm11.41-1.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM14 9c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2z"/></svg>`
@@ -777,6 +843,15 @@ function buildModuleLayout(settings, preferredPage = "") {
   navBottom.appendChild(settingsBtn);
   appendWebsiteButton(navTop);
 
+  const hostEl = $("moduleHost");
+  if (hostEl && hostEl.dataset.admConnJump !== "1") {
+    hostEl.dataset.admConnJump = "1";
+    hostEl.addEventListener("click", (ev) => {
+      if (!ev.target.closest("[data-settings-nav-connections]")) return;
+      openConnectionsInSettings();
+    });
+  }
+
   window.AD_SB_MAIN_SETTINGS?.sync?.(apiFor(settingsPage), settings);
   for (const module of ACTIVE_MODULES) {
     const page = host.querySelector(`.page[data-page="${module.id}"]`);
@@ -787,6 +862,7 @@ function buildModuleLayout(settings, preferredPage = "") {
   applyI18n();
   applySearchFilter($("searchInput")?.value || "");
   startSbStatusTimer();
+  void runPopupOpenExternalListRefresh(settings, host);
 }
 
 function syncActiveModules(settings) {

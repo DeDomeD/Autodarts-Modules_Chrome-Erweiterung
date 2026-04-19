@@ -2,7 +2,6 @@
   scope.AD_SB_MODULES = scope.AD_SB_MODULES || {};
 
   let MISS_GUARD_POPUP_OPEN = false;
-  let CONNECTIONS_OPEN = false;
   const TRIGGER_GROUP_COLLAPSED = {};
   const CUSTOM_EFFECT_TRIGGER_OPTIONS = [
     { value: "miss", de: "Miss", en: "Miss" },
@@ -243,14 +242,15 @@
     `;
   }
 
-  function renderConnectionButton(kind, label) {
+  function renderConnectionButton(kind, label, opts = {}) {
+    const withRetry = !!opts.withRetry;
     return `
       <button
         type="button"
         class="connectionStatusBtn"
         data-connection-kind="${kind}"
         ${kind === "obs" ? "data-obs-status" : "data-sb-status"}
-        data-connection-retry="${kind}"
+        ${withRetry ? `data-connection-retry="${kind}"` : ""}
       >
         <div class="connectionStatusLabel">
           <span>${label}</span>
@@ -270,53 +270,15 @@
       return `
         <h2 class="title"><span data-i18n="title_effects">Effects</span><span class="titleMeta">Streamer.bot/OBS</span></h2>
 
-        <div class="card">
+        <div class="card" data-settings-nav-connections style="cursor:pointer;">
           <div class="sectionHead">
             <div class="sectionTitle" style="margin:0;" data-i18n="section_connections">Verbindungen</div>
-            <button type="button" class="miniChevronBtn${CONNECTIONS_OPEN ? " active" : ""}" id="effectsConnectionToggle" aria-label="Effects Verbindungen" title="Effects Verbindungen"><span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span></button>
           </div>
-          <div class="connectionStatusGrid" id="effectsConnectionGrid" data-connections-open="${CONNECTIONS_OPEN ? "true" : "false"}">
-            ${renderConnectionButton("obs", "OBS")}
-            ${renderConnectionButton("sb", "Streamer.bot")}
+          <div class="connectionStatusGrid" id="effectsConnectionStripGrid" data-connections-open="false">
+            ${renderConnectionButton("obs", "OBS", { withRetry: false })}
+            ${renderConnectionButton("sb", "Streamer.bot", { withRetry: false })}
           </div>
-          <div class="inlinePopupWrap${CONNECTIONS_OPEN ? " open" : ""}" id="effectsConnectionWrap" style="padding:0; border-top:none; background:transparent;">
-            <div class="formRow">
-              <div class="connectionInputHeader">
-                <label class="label" for="obsUrl">OBS WS URL</label>
-                <div class="connectionInputSwitch">
-                  <span>Aktiv</span>
-                  <label class="switch switchCompact"><input id="effectsObsEnabled" type="checkbox" /><span class="slider"></span></label>
-                </div>
-              </div>
-              <input class="input" id="obsUrl" type="text" placeholder="ws://127.0.0.1:4455/" />
-              <div class="hint" data-i18n="hint_obs_ws">OBS WebSocket Server</div>
-            </div>
-            <div class="formRow">
-              <label class="label" for="obsPassword">OBS Passwort</label>
-              <input class="input" id="obsPassword" type="password" placeholder="optional" />
-            </div>
-            <div class="divider"></div>
-            <div class="formRow">
-              <div class="connectionInputHeader">
-                <label class="label" for="sbUrl">Streamer.bot WS URL</label>
-                <div class="connectionInputSwitch">
-                  <span>Aktiv</span>
-                  <label class="switch switchCompact"><input id="effectsSbEnabled" type="checkbox" /><span class="slider"></span></label>
-                </div>
-              </div>
-              <input class="input" id="sbUrl" type="text" placeholder="ws://127.0.0.1:8080/" />
-              <div class="hint" data-i18n="hint_sb_ws">Streamer.bot WebSocket Server</div>
-            </div>
-            <div class="formRow">
-              <label class="label" for="sbPassword">Streamer.bot Passwort</label>
-              <input class="input" id="sbPassword" type="password" placeholder="optional" />
-            </div>
-            <div class="formRow">
-              <label class="label" for="actionPrefix" data-i18n="label_action_prefix">Action Prefix</label>
-              <input class="input" id="actionPrefix" type="text" placeholder="AD-SB " />
-              <div class="hint" data-i18n="hint_action_prefix">Actions run as Prefix + Suffix.</div>
-            </div>
-          </div>
+          <div class="hint" style="margin-top:8px;" data-i18n="module_connections_tap_hint">Tippen, um die Verbindungen in den Einstellungen zu oeffnen.</div>
         </div>
 
         <div class="divider"></div>
@@ -375,6 +337,13 @@
               <div class="liSub">50</div>
             </div>
             <label class="switch"><input type="checkbox" id="enableDBull" /><span class="slider"></span></label>
+          </div>
+          <div class="listToggle">
+            <div class="liText">
+              <div class="liTitle">Leg-Checkout auf Bull</div>
+              <div class="liSub">Leg mit 25/50 beendet (Rest = Dart-Score). Kein Bull-Off („Einbullen“).</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="enableBullCheckout" /><span class="slider"></span></label>
           </div>
         </div>
 
@@ -437,6 +406,24 @@
             </div>
             <label class="switch"><input type="checkbox" id="enableCorrection" /><span class="slider"></span></label>
           </div>
+          <div class="formRow" style="margin:12px 0 4px;">
+            <label class="label" for="turnStartSbMode" data-i18n="turn_start_sb_mode_label">Streamer.bot: Zug-Start</label>
+            <select id="turnStartSbMode" class="input">
+              <option value="player_name" data-i18n="turn_start_sb_mode_player_name">Pro Spielername (z. B. „Bot Level 9 Turn“)</option>
+              <option value="my_opponent" data-i18n="turn_start_sb_mode_my_opponent">Klassisch: Mein Zug / Gegner Zug</option>
+            </select>
+            <div class="hint" data-i18n="turn_start_sb_mode_sub">Pro Name: Action = Prefix + Vorlage unten. Klassisch: Zuordnung ueber „Mein Autodarts-Anzeigename“ und die beiden Schalter.</div>
+          </div>
+          <div class="formRow" style="margin:4px 0 4px;">
+            <label class="label" for="turnStartSuffixTemplate" data-i18n="turn_start_suffix_template_label">Vorlage Zug-Start (Suffix)</label>
+            <input class="input" id="turnStartSuffixTemplate" type="text" placeholder="{name} Turn" autocomplete="off" />
+            <div class="hint" data-i18n="turn_start_suffix_template_sub">Platzhalter <code>{name}</code> = Anzeigename (z. B. Bot Level 9). In Streamer.bot eine Action pro erwartetem Namen anlegen.</div>
+          </div>
+          <div class="formRow" style="margin:12px 0 4px;">
+            <label class="label" for="myAutodartsUsername" data-i18n="my_autodarts_username_label">Mein Autodarts-Anzeigename</label>
+            <input class="input" id="myAutodartsUsername" type="text" placeholder="z. B. dedomed_ttv" autocomplete="off" />
+            <div class="hint" data-i18n="my_autodarts_username_sub">Fuer „Mein Zug“ / „Gegner Zug“ wird dieser Name mit dem aktiven Spieler abgeglichen (ohne Leerzeichen, Gross/Klein egal). Leer = erster Spieler (Slot 0) wie bisher.</div>
+          </div>
           <div class="listToggle">
             <div class="liText">
               <div class="liTitle" data-i18n="my_turn_start_title">Mein Zug</div>
@@ -466,9 +453,10 @@
             <div class="sectionTitle" style="margin:0;" data-i18n="custom_effects_title">Benutzerdefinierte Effekte</div>
           </div>
           <div class="hint" data-i18n="custom_effects_hint">Lege eigene Effekt-Trigger mit Namen, Autodarts-Auslöser und Schalter an.</div>
+          <datalist id="admSbActionNameSuggestions"></datalist>
           <div class="formRow">
             <label class="label" for="customEffectName" data-i18n="custom_effects_name_label">Name</label>
-            <input class="input" id="customEffectName" type="text" placeholder="z. B. Team Winner" />
+            <input class="input" id="customEffectName" type="text" list="admSbActionNameSuggestions" placeholder="z. B. Team Winner" autocomplete="off" />
           </div>
           <div class="formRow">
             <label class="label" for="customEffectTrigger" data-i18n="custom_effects_trigger_label">Autodarts Trigger</label>
@@ -490,7 +478,7 @@
     bind(api) {
       const root = api.root;
       const ids = [
-        "enableMiss", "enableDouble", "enableTriple", "enableBull", "enableDBull",
+        "enableMiss", "enableDouble", "enableTriple", "enableBull", "enableDBull", "enableBullCheckout",
         "enableT20", "enableT19", "enableT18", "enableT17",
         "enableHigh100", "enableHigh140", "enable180", "enableWaschmaschine", "enableNoScore",
         "enableCorrection", "enableMyTurnStart", "enableOpponentTurnStart", "enableSpecialMiss",
@@ -498,26 +486,11 @@
       ];
       ids.forEach((id) => api.bindAuto(root, id, id));
       api.bindAuto(root, "missGuardThreshold", "missGuardThreshold", "number");
-
-      root.querySelector("#effectsConnectionToggle")?.addEventListener("click", () => {
-        CONNECTIONS_OPEN = !CONNECTIONS_OPEN;
-        scope.AD_SB_MODULES.effects.sync(api, api.getSettings?.() || {});
-      });
-
-      api.bindAuto(root, "effectsObsEnabled", "obsEnabled");
-      api.bindAuto(root, "effectsSbEnabled", "sbEnabled");
-      api.bindAutoImmediate(root, "obsUrl", "obsUrl", (value) => String(value || "").trim());
-      api.bindAutoImmediate(root, "obsPassword", "obsPassword", (value) => String(value || ""));
-      api.bindAutoImmediate(root, "sbUrl", "sbUrl", (value) => String(value || "").trim());
-      api.bindAutoImmediate(root, "sbPassword", "sbPassword", (value) => String(value || ""));
-      api.bindAutoImmediate(root, "actionPrefix", "actionPrefix", (value) => api.normalizePrefix(value || ""));
-      root.querySelectorAll("[data-connection-retry]").forEach((button) => {
-        button.addEventListener("click", async () => {
-          const kind = String(button.dataset.connectionRetry || "");
-          if (kind === "sb") await api.send({ type: "SB_RETRY" });
-          if (kind === "obs") await api.send({ type: "OBS_RETRY" });
-          setTimeout(() => api.refreshConnectionStatuses?.(), 150);
-        });
+      api.bindAutoImmediate(root, "myAutodartsUsername", "myAutodartsUsername", (value) => String(value || "").trim());
+      api.bindAutoImmediate(root, "turnStartSuffixTemplate", "turnStartSuffixTemplate", (value) => String(value || "").trim());
+      root.querySelector("#turnStartSbMode")?.addEventListener("change", async (ev) => {
+        const v = String(ev.target?.value || "player_name").trim().toLowerCase();
+        await api.savePartial({ turnStartSbMode: v === "my_opponent" ? "my_opponent" : "player_name" });
       });
 
       root.querySelector("#missGuardPopupToggle")?.addEventListener("click", () => {
@@ -614,36 +587,26 @@
       const root = api.root;
       const s = settings || {};
       const ids = [
-        "enableMiss", "enableDouble", "enableTriple", "enableBull", "enableDBull",
+        "enableMiss", "enableDouble", "enableTriple", "enableBull", "enableDBull", "enableBullCheckout",
         "enableT20", "enableT19", "enableT18", "enableT17",
         "enableHigh100", "enableHigh140", "enable180", "enableWaschmaschine", "enableNoScore",
         "enableCorrection", "enableMyTurnStart", "enableOpponentTurnStart", "enableSpecialMiss",
         "missGuardOnDoubleOut"
       ];
       ids.forEach((id) => api.setChecked(root, id, !!s[id]));
-      api.setChecked(root, "effectsObsEnabled", s.obsEnabled !== false);
-      api.setChecked(root, "effectsSbEnabled", s.sbEnabled !== false);
-      api.setValue(root, "sbUrl", s.sbUrl || "");
-      api.setValue(root, "sbPassword", s.sbPassword || "");
-      api.setValue(root, "obsUrl", s.obsUrl || "");
-      api.setValue(root, "obsPassword", s.obsPassword || "");
-      api.setValue(root, "actionPrefix", String(s.actionPrefix || "").trim());
       api.setValue(root, "missGuardThreshold", Number.isFinite(s.missGuardThreshold) ? s.missGuardThreshold : 40);
-      const connectionWrap = root.querySelector("#effectsConnectionWrap");
-      if (connectionWrap) connectionWrap.classList.toggle("open", CONNECTIONS_OPEN);
-      const connectionGrid = root.querySelector("#effectsConnectionGrid");
+      api.setValue(root, "myAutodartsUsername", String(s.myAutodartsUsername || "").trim());
+      const mode = String(s.turnStartSbMode || "player_name").toLowerCase().trim();
+      api.setValue(root, "turnStartSbMode", mode === "my_opponent" ? "my_opponent" : "player_name");
+      api.setValue(root, "turnStartSuffixTemplate", String(s.turnStartSuffixTemplate || "{name} Turn").trim() || "{name} Turn");
+      const connectionGrid = root.querySelector("#effectsConnectionStripGrid");
       if (connectionGrid) {
-        connectionGrid.dataset.connectionsOpen = CONNECTIONS_OPEN ? "true" : "false";
+        connectionGrid.dataset.connectionsOpen = "false";
         const visibleCount = Array.from(connectionGrid.querySelectorAll("[data-connection-kind]")).filter((node) => {
           const kind = String(node.dataset.connectionKind || "");
           return kind === "obs" ? s.obsEnabled !== false : s.sbEnabled !== false;
         }).length;
         connectionGrid.classList.toggle("compactSingle", visibleCount <= 1);
-      }
-      const connectionToggle = root.querySelector("#effectsConnectionToggle");
-      if (connectionToggle) {
-        connectionToggle.classList.toggle("active", CONNECTIONS_OPEN);
-        connectionToggle.innerHTML = `<span class="ddArrow">${CONNECTIONS_OPEN ? "^" : "v"}</span>`;
       }
       const popupWrap = root.querySelector("#missGuardPopupWrap");
       if (popupWrap) popupWrap.classList.toggle("open", MISS_GUARD_POPUP_OPEN);
@@ -660,6 +623,29 @@
       const mount = root.querySelector("#customEffectsListMount");
       if (mount) mount.innerHTML = renderCustomEffectsList(s);
       api.refreshConnectionStatuses?.();
+    },
+    async refreshSbActionsDatalist(api) {
+      const root = api?.root;
+      const dl = root?.querySelector?.("#admSbActionNameSuggestions");
+      if (!dl) return;
+      try {
+        const res = await api.send({ type: "SB_GET_ACTIONS" });
+        const raw = res?.ok && Array.isArray(res.actions) ? res.actions : [];
+        const names = [];
+        for (const a of raw) {
+          const n = String(a?.name || "").trim();
+          if (n && !names.includes(n)) names.push(n);
+        }
+        names.sort((a, b) => a.localeCompare(b));
+        dl.innerHTML = "";
+        for (const n of names) {
+          const opt = document.createElement("option");
+          opt.value = n;
+          dl.appendChild(opt);
+        }
+      } catch {
+        /* ignore */
+      }
     }
   };
 })(window);
